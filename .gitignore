@@ -1,0 +1,22 @@
+# Secrets / machine-specific
+local.properties
+
+# Gradle / build output
+.gradle/
+build/
+app/build/
+.kotlin/
+
+# Android Studio
+.idea/
+*.iml
+captures/
+
+# JVM heap dumps
+*.hprof
+
+# Signing keys
+*.jks
+*.keystore
+
+.DS_Store
