@@ -25,7 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.seema.assistant.ui.jarvis.JarvisScreen
+import com.seema.assistant.ui.jarvis.SeemaHudScreen
 import com.seema.assistant.ui.theme.SeemaTheme
 
 /**
@@ -75,23 +75,15 @@ class MainActivity : ComponentActivity() {
                 val serviceRunning by SeemaState.serviceRunning.collectAsStateWithLifecycle()
                 val routines by SeemaRoutines.routinesFlow.collectAsStateWithLifecycle()
 
-                JarvisScreen(
+                SeemaHudScreen(
                     state = state,
                     lastResponse = lastResponse,
                     audioLevel = audioLevel,
-                    micGranted = micGranted,
                     serviceRunning = serviceRunning,
+                    micGranted = micGranted,
                     routineNames = routines.map { it.name },
                     onGrantClick = ::onGrantClick,
                     onTalk = { SeemaState.send(SeemaCommand.START_CONVERSATION) },
-                    onBriefing = { SeemaState.send(SeemaCommand.DAILY_BRIEFING) },
-                    onRunRoutine = { name -> SeemaState.requestRoutine(name) },
-                    onAddTile = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        ::requestAddTile
-                    } else null,
-                    onAddWidget = if (AppWidgetManager.getInstance(this).isRequestPinAppWidgetSupported) {
-                        ::requestAddWidget
-                    } else null,
                     onSendText = { text -> SeemaState.sendText(text) }
                 )
             }
