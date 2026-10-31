@@ -1,4 +1,4 @@
-package com.seema.jarvis.ui.components
+package com.seema.assistant.ui.components
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -32,8 +32,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.seema.jarvis.ui.theme.NeonCyan
+import com.seema.assistant.ui.theme.JarvisCyan
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -44,9 +45,15 @@ import kotlin.math.sin
  * Animated values are only read while drawing, so the radar never recomposes per frame.
  */
 @Composable
-fun SciFiRadar(scanning: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun SciFiRadar(
+    scanning: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    compactSize: Dp = COMPACT_SIZE,
+    expandedSize: Dp = EXPANDED_SIZE
+) {
     val radarSize by animateDpAsState(
-        targetValue = if (scanning) EXPANDED_SIZE else COMPACT_SIZE,
+        targetValue = if (scanning) expandedSize else compactSize,
         animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
         label = "radarSize"
     )
@@ -84,14 +91,14 @@ fun SciFiRadar(scanning: Boolean, onClick: () -> Unit, modifier: Modifier = Modi
             drawRadar(
                 sweep = if (scanning) fastSweep else slowSweep,
                 pulse = pulse,
-                color = NeonCyan
+                color = JarvisCyan
             )
         }
         if (scanning) {
             Text(
                 text = "SCANNING...",
                 style = MaterialTheme.typography.labelLarge,
-                color = NeonCyan,
+                color = JarvisCyan,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 6.dp)

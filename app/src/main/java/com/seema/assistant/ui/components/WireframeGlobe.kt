@@ -1,4 +1,4 @@
-package com.seema.jarvis.ui.components
+package com.seema.assistant.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
@@ -31,8 +31,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
-import com.seema.jarvis.ui.theme.NeonCyan
-import com.seema.jarvis.ui.theme.TacticalAmber
+import com.seema.assistant.ui.theme.JarvisCyan
+import com.seema.assistant.ui.theme.ThinkingAmber
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -41,9 +41,15 @@ import kotlin.math.sin
  * 3D wireframe globe: parallels, meridians and glowing grid dots, projected with sine/cosine,
  * spinning on its Y axis with a slight tilt. The far side is drawn faintly for depth.
  * Tapping toggles [locked]: the globe turns amber and a tactical target-lock overlay appears.
+ * Otherwise it is drawn in [baseColor] (SEEMA's current state colour).
  */
 @Composable
-fun WireframeGlobe(locked: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun WireframeGlobe(
+    locked: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    baseColor: Color = JarvisCyan
+) {
     val transition = rememberInfiniteTransition(label = "globe")
     val rotation by transition.animateFloat(
         initialValue = 0f,
@@ -57,7 +63,7 @@ fun WireframeGlobe(locked: Boolean, onClick: () -> Unit, modifier: Modifier = Mo
         animationSpec = infiniteRepeatable(tween(LOCK_SPIN_MS, easing = LinearEasing)),
         label = "lockSpin"
     )
-    val color by animateColorAsState(if (locked) TacticalAmber else NeonCyan, tween(500), label = "globeColor")
+    val color by animateColorAsState(if (locked) ThinkingAmber else baseColor, tween(500), label = "globeColor")
     val geometry = remember { GlobeGeometry() }
 
     Box(

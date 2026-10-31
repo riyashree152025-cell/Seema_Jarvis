@@ -1,4 +1,4 @@
-package com.seema.jarvis.ui.components
+package com.seema.assistant.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,10 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
-import com.seema.jarvis.ui.theme.GlassBottom
-import com.seema.jarvis.ui.theme.GlassTop
-import com.seema.jarvis.ui.theme.NeonCyan
-import com.seema.jarvis.ui.theme.TextSecondary
+import com.seema.assistant.ui.theme.GlassBottom
+import com.seema.assistant.ui.theme.GlassTop
+import com.seema.assistant.ui.theme.JarvisCyan
+import com.seema.assistant.ui.theme.TextSecondary
 
 /**
  * Translucent "glass" panel with a glowing edge and a titled header. [content] fills the body;
@@ -42,20 +42,20 @@ fun GlassPanel(
         modifier = modifier
             .clip(shape)
             .background(Brush.verticalGradient(listOf(GlassTop, GlassBottom)))
-            .border(1.dp, Brush.verticalGradient(listOf(NeonCyan.copy(alpha = 0.6f), NeonCyan.copy(alpha = 0.1f))), shape)
+            .border(1.dp, Brush.verticalGradient(listOf(JarvisCyan.copy(alpha = 0.6f), JarvisCyan.copy(alpha = 0.1f))), shape)
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(NeonCyan, CircleShape))
+            Box(Modifier.size(6.dp).background(JarvisCyan, CircleShape))
             Spacer(Modifier.width(8.dp))
-            Text(title, style = MaterialTheme.typography.labelSmall, color = NeonCyan)
+            Text(title, style = MaterialTheme.typography.labelSmall, color = JarvisCyan)
         }
         Box(
             Modifier
                 .padding(vertical = 6.dp)
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(NeonCyan.copy(alpha = 0.25f))
+                .background(JarvisCyan.copy(alpha = 0.25f))
         )
         content()
     }

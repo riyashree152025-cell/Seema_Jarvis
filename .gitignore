@@ -1,4 +1,4 @@
-# Secrets / machine-specific
+# Secrets — never commit (GEMINI_API_KEY lives here)
 local.properties
 
 # Gradle / build output
@@ -11,12 +11,15 @@ app/build/
 .idea/
 *.iml
 captures/
+.externalNativeBuild/
+.cxx/
 
-# JVM heap dumps
+# JVM heap dumps (written when a Gradle/Kotlin daemon runs out of memory; can be GBs)
 *.hprof
 
 # Signing keys
 *.jks
 *.keystore
 
+# OS
 .DS_Store

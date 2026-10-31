@@ -1,24 +1,33 @@
-# SEEMA — Sci-Fi HUD
+# SEEMA
 
-An Iron Man JARVIS-style HUD dashboard for Android, drawn entirely with Jetpack Compose
-`Canvas` (no images).
+A personal, always-on JARVIS-style voice assistant for Android: on-device wake word
+(openWakeWord), Gemini brain via Google ADK for Kotlin, ~60 phone-control tools, memory,
+routines, automations, proactive briefings, a sci-fi Compose HUD, Quick Settings tiles,
+a home screen widget and an offline fallback mode.
 
-- **Radar (top-left):** concentric rings, rotating sweep, contacts that light up as the
-  sweep passes, pulsing core. Tap to expand into a 4-second "SCANNING..." mode.
-- **3D wireframe globe (centre):** latitude/longitude lines and grid dots projected with
-  sine/cosine, spinning on its Y axis, far side drawn faintly. Tap for an amber
-  "TARGET LOCKED" overlay.
-- **Glass panels:** translucent panels top-right and bottom, ready for live data.
+Two HUD views, switched with the ◎ TACTICAL / ◉ REACTOR button on the main screen:
+- **Reactor:** animated arc reactor with live readouts (time, network, battery, alarm,
+  messages, weather, audio).
+- **Tactical:** canvas-drawn radar (tap to scan; scans while SEEMA listens), a rotating 3D
+  wireframe globe in SEEMA's state colour (tap for target lock), and glass data panels.
 
-Package `com.seema.jarvis` · minSdk 26 · targetSdk 35 · Kotlin 2.0.21 · AGP 8.7.3 ·
-Compose BOM 2024.12.01.
+Personal use only — not intended for the Play Store.
 
-## Build
+## Setup
 
-Open the folder in Android Studio and press Run, or from a terminal:
+1. Open the project in Android Studio (it will offer to add the Gradle wrapper on first sync).
+2. Create `local.properties` in the project root (it is git-ignored):
+   ```properties
+   sdk.dir=/path/to/Android/sdk
+   GEMINI_API_KEY=your-key-from-aistudio.google.com
+   # optional fallback city for weather
+   SEEMA_HOME_CITY=Patna
+   ```
+3. Wake word: `hey_jarvis_v0.1.onnx` is included, so "Hey Jarvis" works out of the box.
+   For "Seema", train `seema.onnx` with the openWakeWord Colab and put it in
+   `app/src/main/assets/`; it takes priority automatically. See `LICENSE-MODELS`.
+4. Build, install, and grant the permissions the app asks for.
 
-```
-./gradlew installDebug
-```
+## Requirements
 
-The HUD preview is in `ui/screen/HudScreen.kt` (`HudScreenPreview`).
+Android 8.0+ (minSdk 26), compileSdk 35, Kotlin 2.0.21, AGP 8.7.3.
