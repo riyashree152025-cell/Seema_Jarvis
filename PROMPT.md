@@ -1,9 +1,9 @@
 # SEEMA — System Prompt Design
 
-A 10-block specification for the spoken prompt that drives SEEMA's cloud brain. Blocks 1–8 and 10 are
+A 10-block specification for the spoken prompt behind SEEMA's cloud brain. Blocks 1–8 and 10 are
 static in content (cacheable prefix); block 9 is the only per-turn dynamic injection.
 
-Grounding: at commit `85ef7a2` the prompt is one 5,923-character monolith (`SeemaAgent.kt:36-119`)
+Grounding: at commit `130d43b` the prompt is one 5,923-character monolith (`SeemaAgent.kt:36-119`)
 with a dynamic tail appended per turn (`SeemaAgent.kt:299-342`). This spec keeps that structure but
 splits the monolith so each concern can be edited, trimmed or cached independently. Every line is
 written for the ear, in the app's Hinglish-friendly register.
@@ -29,8 +29,8 @@ If I ask for something you truly cannot do, say it in one line and offer the clo
 
 ## Block 2 — VOICE OUTPUT RULES
 
-**Why:** every reply is spoken by on-device TTS (`SeemaTextToSpeech.kt`); markdown, bullets or long
-enumerations are read aloud literally and cost output tokens.
+**Why:** every reply is spoken by on-device TTS (`SeemaTextToSpeech.kt`); markdown, bullets and long
+enumerations are read aloud literally and burn output tokens.
 
 ```
 Everything you say is spoken aloud. Write for the ear: one to three short sentences, nothing else.
@@ -56,8 +56,7 @@ Switch with me mid-conversation, on the very next sentence, and never comment on
 ## Block 4 — TOOL CONTRACT
 
 **Why:** 54 tools are the product (`SeemaAgent.kt:132-145`). Without a contract the model claims
-success without calling anything, repeats actions that were already applied, or invents contacts
-and app names.
+success without calling anything, repeats applied actions, or invents contacts and app names.
 
 ```
 To change anything on this phone, call a tool. Never say something is done unless a tool returned status ok.
@@ -109,9 +108,9 @@ Keep any proactive line under two sentences, and never repeat the same proactive
 
 ## Block 8 — UNCERTAINTY
 
-**Why:** hallucinated device state is the worst failure mode for a phone assistant. Without this
-block the model estimates battery, weather or the time instead of calling a tool, or reports a
-network failure as a successful action.
+**Why:** hallucinated device state is the worst failure mode here. Without this block the model
+estimates battery, weather or time instead of calling a tool, and reports a network failure as
+success.
 
 ```
 Never estimate a phone fact — battery, alarm, weather, notifications, time. Call the tool.

@@ -1,13 +1,13 @@
 # SEEMA — Roadmap
 
 Phases are ordered by dependency, not ambition. P0 protects what already works; P1 is what makes the
-running cost predictable; P2 and P3 buy capability only after P1 has capped the bill. Baseline for
-every "status today" claim: commit `85ef7a2`.
+running cost predictable; P2 and P3 buy capability only after P1 has capped the bill.
 
-Status vocabulary: **done** = shipped in this tree; **partial** = a mechanism exists but misses the
-acceptance criterion; **not built** = nothing in the tree. Effort is engineering days for one
-developer familiar with the codebase, excluding OEM device testing; ranges reflect Android
-background-execution differences.
+Status vocabulary: **done** = shipped at the baseline commit; **partial** = a mechanism exists but
+misses the acceptance criterion; **not built** = nothing in the tree. Baseline: commit `130d43b`.
+Effort is engineering days for one developer familiar with the codebase, excluding OEM device
+testing. A later commit can invalidate a status row — re-check against the tree before planning
+sprints from it.
 
 ---
 
@@ -15,25 +15,23 @@ background-execution differences.
 
 | # | Item | Status today | Acceptance criteria | Effort | Depends on |
 |---|---|---|---|---|---|
-| P0.1 | Wake word honesty | **partial** | The notification, the HUD status label and the sleep label all name the model actually loaded. If `seema.onnx` is absent, every surface says "Hey Jarvis". Nothing says "Seema" while `hey_jarvis_v0.1.onnx` is the loaded model. | 0.5–1 d | — |
+| P0.1 | Wake word honesty | **done, one residual** | The notification, HUD and sleep label all name the model actually loaded. Notifications now derive the phrase from the resolved asset (`SeemaVoiceService.kt:274,332`) and `WAKE_WORD_NAME` is gone. Residual: `AgentState.SLEEPING` still hard-codes "SAY HEY JARVIS" (`SeemaState.kt:15`), so the HUD will misname the phrase once `seema.onnx` ships. Fix that label, then this row is fully closed. | 0.5 d | — |
 | P0.2 | Ship or train `seema.onnx` | **not built** | Either a trained `seema.onnx` in `app/src/main/assets/` with a documented training recipe and a false-accept measurement, or the decision recorded to ship "Hey Jarvis" permanently. | 2–5 d (training/measurement) | P0.1 |
-| P0.3 | Reboot survival | **partial** | After a reboot: reminders and geofences are re-registered, scheduled briefings/routines still run, and the user has a one-tap path back to always-on listening from a notification. Document explicitly which part cannot be automatic and why. | 2–3 d | P0.4 |
-| P0.4 | Permissions onboarding | **partial** | One guided screen showing every access SEEMA needs, each with state (granted / denied / not asked) and a working deep link: mic, contacts, phone, SMS, notification-listener access, DND access, modify-system-settings, display-over-other-apps, battery-optimization exemption, background location, exact alarms, notifications. Every capability the app claims is reachable without reading source. | 2–3 d | — |
-| P0.5 | Stop control | **partial** | A hard stop that (a) cancels the current conversation, (b) flushes TTS mid-utterance, (c) ends follow-up mode, and (d) is reachable from the app UI, the foreground notification and the Quick Settings tile. Spoken exit phrases keep working but stop being the only way out. | 1.5–2 d | — |
-| P0.6 | New UI | **partial** | A control surface that shows, at minimum: live state, service-running/sleeping, active wake word, today's turn count and estimated spend, router enabled/disabled, memory count with a browse/delete screen, and the permission board from P0.4. Two existing HUD skins are kept. | 4–6 d | P0.4 |
+| P0.3 | Reboot survival | **done, unverified on device** | Listening comes back after reboot, reinstall and OEM quick-boot, and only when the user had it on. `SeemaBootReceiver` + the `service_enabled` flag implement this (`SeemaBootReceiver.kt:24-46`, `SeemaVoiceService.kt:719`). Remaining: confirm on a real device that the mic FGS start is not refused on Android 14+; the receiver catches and logs that failure rather than retrying (`SeemaBootReceiver.kt:42-45`). | 1–2 d (device verification) | — |
+| P0.4 | Permissions onboarding | **partial** | One guided screen showing every access SEEMA needs, each with state and a working deep link: mic, contacts, phone, SMS, notification-listener access, DND access, modify-system-settings, display-over-other-apps, battery-optimization exemption, background location, exact alarms, notifications. Today only the overlay and notification-access prompts exist (`MainActivity.kt:174-192`) on top of the bulk runtime-permission request (`:125`); DND, write-settings, exact alarms and background location are still discovered only when a tool fails. | 2–3 d | — |
+| P0.5 | Stop control | **done** | A hard stop that cancels the conversation, flushes TTS mid-utterance, ends follow-up mode, and is reachable without speaking. Implemented as `SeemaCommand.STOP`, the notification "Stop" action (`ACTION_STOP`, `SeemaVoiceService.kt:168,713`) and in-app control; cancellation reaches `TextToSpeech.stop()` through `SeemaTextToSpeech`'s `finally` (`SeemaTextToSpeech.kt:82-87`). Remaining: confirm the Quick Settings tile also exposes stop. | 0.5 d (verify tile path) | — |
+| P0.6 | New UI | **done** | A control surface with state, telemetry, typed commands and onboarding. The Reactor/Tactical HUDs were replaced by the JARVIS instrument interface (`ui/jarvis/`, `MainActivity.kt:78`). Still missing from the acceptance list: today's turn count, estimated spend, router toggle and a memory browser — those depend on P1.6. | 2–4 d (cost panels only) | P1.6 |
 
 P0 phase acceptance: a fresh install reaches fully-granted, always-on, stoppable, cost-visible
 operation by tapping through one screen, with no ambiguity about which wake word to say.
 
-Constraints P0.3 must respect, from the current code:
+Notes from the current code that P0.2 and P0.3 still depend on:
 
-- `ReminderBootReceiver` handles only `BOOT_COMPLETED` → reminders + geofences
-  (`SeemaReminders.kt:218-227`). The voice service is never restarted; it returns only when the user
-  opens the app (`MainActivity.kt:131,199-202`).
-- A microphone-type foreground service cannot generally be started from a boot receiver on
-  Android 14+, and the code already refuses when it is illegal (`SeemaVoiceService.kt:546-575`,
-  comment at `:571`). So P0.3 is "notification with one tap", plus an attempt via the
-  draw-over-apps exemption that is verified per device — never a promised auto-start.
+- `seema.onnx` is preferred but absent; only `hey_jarvis_v0.1.onnx` ships
+  (`SeemaVoiceService.kt:778`), so the honest phrase today is "Hey Jarvis".
+- A microphone foreground service cannot reliably start from a boot receiver on Android 14+; the
+  receiver attempts it, catches `ForegroundServiceStartNotAllowedException` and leaves the
+  `service_enabled` flag set so the next app launch restores listening (`SeemaBootReceiver.kt:16-20,42-45`).
 - WorkManager-persisted work (daily briefing, scheduled routines) is re-scheduled by WorkManager
   itself after reboot. That part is **done**; do not rebuild it.
 
@@ -92,12 +90,13 @@ daily cap and should route through the deterministic layer wherever possible —
 
 ## Effort summary
 
-| Phase | Effort | Ship condition |
+| Phase | Effort still open | Ship condition |
 |---|---|---|
-| P0 | 12–20 d | Honest, survivable, stoppable, cost-visible |
+| P0 | 6–12 d | Honest, survivable, stoppable, cost-visible |
 | P1 | 16–24 d | ≥80 % of actions off-cloud, daily budget enforced |
 | P2 | 12–17 d | Streaming conversation, capped, never a regression |
 | P3 | 18–28 d | New senses with privacy and rate limits in place |
 
-Sequencing rule: finish P0.1 and P0.5 before P1.1 — the router is only useful if the user trusts that
-SEEMA hears them and can be stopped.
+Sequencing rule: P0.2 (decide the wake word for good) and P1.1 (router) come first — the router is
+only useful if the user trusts that SEEMA hears them and can be stopped, and both are already
+partly true.

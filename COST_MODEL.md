@@ -1,7 +1,7 @@
 # SEEMA — Cost Model
 
 **Everything numeric here is an ESTIMATE, not a quote.** It was written without network access, from
-source-code facts at commit `85ef7a2` plus stated assumptions. Provider prices change without notice
+source-code facts at commit `130d43b` plus stated assumptions. Provider prices change without notice
 and vary by region, tier and model alias. Treat §2 as *parameters to be replaced*, then re-run §3.
 Verify every figure on the provider's pricing page before trusting a total.
 
@@ -14,12 +14,12 @@ it — and its price — can change without a code change. Pin a version once th
 
 "SEEMA is on for 3 hours" and "SEEMA is talking for 3 hours" are different by an order of magnitude.
 
-- **App open / service alive**: the wake-word engine is listening on-device. This costs ₹0 in API
-  terms. Today it is also ₹0 in practice: at idle only the ONNX models run, and after two minutes of
-  silence the service sleeps with the engine still armed (`SeemaVoiceService.kt:288-325,649`).
-- **Actually speaking**: a user utterance plus a reply. This is where cloud tokens are spent, and it
-  is bounded by the conversation loop — 6 s follow-up window, at most 10 wake-word-free turns per
-  conversation (`SeemaVoiceService.kt:643,647`).
+- **App open / service alive**: the wake-word engine listens on-device. ₹0 in API terms, and ₹0 in
+  practice too — at idle only the ONNX models run, and after two minutes of silence the service
+  sleeps with the engine still armed (`SeemaVoiceService.kt:361-386,740`).
+- **Actually speaking**: a user utterance plus a reply. This is where tokens are spent, bounded by
+  the conversation loop — 6 s follow-up window, at most 10 wake-word-free turns per conversation
+  (`SeemaVoiceService.kt:734,738`).
 
 Assumption used throughout: **speech duty cycle is 10–20 % of app-open time**, i.e. of a 3-hour
 window, 18–36 minutes contain actual exchanges. This is an assumption, not a measurement. The app
@@ -47,7 +47,7 @@ FX assumption: **₹88 = $1**. Assumed prices per 1M tokens:
 | Flash-Lite-class text LLM | $0.10 | $0.40 | cheaper conversational tier |
 | Live API audio in | $1.00 / 1M audio tokens | — | audio ≈ 25 tokens/s ⇒ 90,000 tokens/hour |
 | Live API audio out | — | $2.00 / 1M audio tokens | same 25 tokens/s ⇒ 90,000 tokens/hour |
-| Free tier | $0 | $0 | daily request caps; quota-exhaustion already degrades to basics (`SeemaVoiceService.kt:472-479`) |
+| Free tier | $0 | $0 | daily request caps; quota-exhaustion already degrades to basics (`SeemaVoiceService.kt:546-550`) |
 
 ### Tokens per turn, from the actual code
 
@@ -67,18 +67,18 @@ Derived per-turn costs (input × price-in + output × price-out):
 | Configuration | ₹ per cloud turn |
 |---|---|
 | Flash text, no router (~8,600 in / 80 out) | ~₹0.25 |
+| Flash-Lite text, no router | ~₹0.08 |
 | Flash text, router active (~4,100 in / 80 out) | ~₹0.13 |
 | Flash-Lite, router active | ~₹0.04 |
 
 Unmodelled surcharges, stated so they are not mistaken for precision:
 
-- Multi-step/tool turns usually need a second model round trip (tool call, then answer): assume
-  **+40 % to +150 %** on those turns. Multi-tool routined turns are the expensive ones.
-- Proactive jobs spend without the user present: the daily briefing is a full agent turn and is
-  **on by default** (`SeemaProactive.kt:33-34,114-143`), and each scheduled/triggered routine is
-  another (`SeemaProactive.kt:237-265`), retried up to 3 attempts. Budget ~3 extra turns/day
-  ≈ +₹22/month on Flash. Rain alerts cost nothing: they call the weather API, not the model
-  (`SeemaProactive.kt:158`).
+- Multi-step/tool turns usually need a second round trip (tool call, then answer): add **+40 % to
+  +150 %** on those. Multi-tool routined turns are the expensive ones.
+- Proactive jobs spend with nobody present: the daily briefing is a full agent turn and is **on by
+  default** (`SeemaProactive.kt:33-34,114-143`), each scheduled/triggered routine is another
+  (`:237-265`), retried up to 3 times. Budget ~3 turns/day ≈ +₹22/month on Flash. Rain alerts are
+  ₹0 — they call the weather API, not the model (`:158`).
 - On-device TTS, wake word, Open-Meteo weather and the offline router are all ₹0.
 
 ---
@@ -94,10 +94,9 @@ conversation.
 |---|---|
 | 2 / 3 / 5 h per day | **₹0** |
 
-Caveats, not footnotes: free-tier daily caps will be hit on heavy days, the app degrades to basics
-when they are (`SeemaVoiceService.kt:472-479`), and free-tier traffic is typically used by the
-provider to improve its products. This stack also has the highest latency and the lowest
-conversational quality.
+Caveats, not footnotes: free-tier daily caps get hit on heavy days and the app degrades to basics
+when they do (`SeemaVoiceService.kt:546-550`); free-tier traffic is typically used by the provider to
+improve its products. This stack also has the highest latency and the lowest conversational quality.
 
 ### (b) On-device gating + paid Gemini text LLM
 
@@ -136,8 +135,8 @@ $0.18/h — but SEEMA speaks well under half the time, so assume ~$0.054/h of ou
 Arithmetic for the naive row: 2 h × ₹12.7 × 30 = ₹762. Gated row: 2 h × 0.15 × ₹12.7 × 30 = ₹114.
 
 This is the whole argument for on-device gating: **without local VAD/wake-word gating, Live audio
-alone exceeds the ₹1000–1500 budget at 3 h/day.** With gating, the same feature fits with room for
-the text path. Add ±40 % for token-rate uncertainty and for audio the model emits while "thinking".
+alone exceeds the ₹1000–1500 budget at 3 h/day.** Gated, it fits with room for the text path. Add
+±40 % for token-rate uncertainty and for audio emitted while "thinking".
 
 ### Budget verdict
 
@@ -172,7 +171,7 @@ that is very hard to hit by accident once the router and gating exist — and ea
 7. **Model tiering.** Short conversational turns to the Lite tier; Flash only for multi-step tool
    orchestration and the briefing. Make the default-on briefing opt-in and cap its retries.
 8. **Cap the loop, not the user.** `MAX_CONVERSATION_TURNS = 10` and the 6 s follow-up window
-   (`SeemaVoiceService.kt:643,647`) already bound a conversation; shrink the follow-up window before
+   (`SeemaVoiceService.kt:734,738`) already bound a conversation; shrink the follow-up window before
    reducing capability.
 
 ---
