@@ -63,9 +63,9 @@ fun MatrixTerminalScreen(
                 rain.forEach { line ->
                     Text(
                         text = line,
-                        color = HUD.Blood.copy(alpha = 0.22f),
-                        fontSize = 15.sp,
-                        lineHeight = 20.sp,
+                        color = HUD.Blood.copy(alpha = 0.40f),
+                        fontSize = 20.sp,
+                        lineHeight = 27.sp,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1
                     )
@@ -87,14 +87,14 @@ fun MatrixTerminalScreen(
                             Text(
                                 text = label,
                                 color = HUD.TextMuted,
-                                fontSize = 12.sp,
+                                fontSize = 16.sp,
                                 fontFamily = FontFamily.Monospace,
                                 letterSpacing = 1.2.sp
                             )
                             Text(
                                 text = value,
                                 color = HUD.TextPrimary,
-                                fontSize = 12.sp,
+                                fontSize = 16.sp,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
@@ -108,7 +108,7 @@ fun MatrixTerminalScreen(
                     Text(
                         text = "STDOUT",
                         color = HUD.BloodDim,
-                        fontSize = 11.sp,
+                        fontSize = 15.sp,
                         fontFamily = FontFamily.Monospace,
                         letterSpacing = 2.4.sp
                     )
@@ -121,8 +121,8 @@ fun MatrixTerminalScreen(
                         Text(
                             text = "$ " + line + if (newest) " ▌" else "",
                             color = if (newest) HUD.TextPrimary else HUD.TextMuted,
-                            fontSize = 12.sp,
-                            lineHeight = 14.sp,
+                            fontSize = 16.sp,
+                            lineHeight = 19.sp,
                             fontFamily = FontFamily.Monospace,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -142,8 +142,8 @@ private fun Header() {
         modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text("MARK-III", color = HUD.BloodDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, letterSpacing = 3.sp)
-        Text("DATA MATRIX", color = HUD.BloodDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, letterSpacing = 3.sp)
+        Text("MARK-III", color = HUD.BloodDim, fontSize = 16.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.6.sp)
+        Text("DATA MATRIX", color = HUD.BloodDim, fontSize = 16.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.6.sp)
     }
 }
 

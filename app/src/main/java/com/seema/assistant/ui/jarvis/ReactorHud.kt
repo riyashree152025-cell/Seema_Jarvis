@@ -90,10 +90,10 @@ fun ReactorHud(
                 Text(
                     text = state.hudLabel(),
                     color = color.copy(alpha = 0.92f),
-                    fontSize = 14.sp,
+                    fontSize = 19.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
-                    letterSpacing = 7.sp
+                    letterSpacing = 1.6.sp
                 )
                 Spacer(Modifier.height(8.dp))
                 Waveform(level = level, color = color, active = state != AgentState.IDLE && state != AgentState.SLEEPING)
@@ -145,7 +145,7 @@ private fun ReactorCore(
         // ---- outer halo: layered flat discs, no per-frame shader
         for (i in 6 downTo 1) {
             drawCircle(
-                color = color.copy(alpha = 0.050f + glow * 0.030f),
+                color = color.copy(alpha = 0.085f + glow * 0.055f),
                 radius = r * (1f + i * 0.42f),
                 center = Offset(cx, cy)
             )
@@ -289,7 +289,7 @@ private fun StatusCard(state: AgentState, logs: List<String>, color: Color) {
                     Text(
                         text = "SEEMA_JARVIS ONLINE",
                         color = HUD.TextPrimary,
-                        fontSize = 14.sp,
+                        fontSize = 19.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 2.4.sp
@@ -298,7 +298,7 @@ private fun StatusCard(state: AgentState, logs: List<String>, color: Color) {
                 Text(
                     text = state.hudLabel(),
                     color = color,
-                    fontSize = 12.sp,
+                    fontSize = 16.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.6.sp
                 )
@@ -314,13 +314,13 @@ private fun StatusCard(state: AgentState, logs: List<String>, color: Color) {
 @Composable
 private fun CommandLog(logs: List<String>) {
     val visible = if (logs.isEmpty()) listOf("core idle — awaiting wake word") else logs.takeLast(3)
-    Column(Modifier.fillMaxWidth().height(58.dp), verticalArrangement = Arrangement.Bottom) {
+    Column(Modifier.fillMaxWidth().height(108.dp), verticalArrangement = Arrangement.Bottom) {
         visible.forEachIndexed { index, line ->
             val newest = index == visible.lastIndex
             Text(
                 text = (if (newest) "› " else "  ") + line,
                 color = if (newest) HUD.TextPrimary else HUD.TextMuted,
-                fontSize = 14.sp,
+                fontSize = 19.sp,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

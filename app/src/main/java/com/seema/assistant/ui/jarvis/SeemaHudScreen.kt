@@ -3,6 +3,7 @@ package com.seema.assistant.ui.jarvis
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -103,7 +107,33 @@ fun SeemaHudScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(HUD.Black)) {
-        // Layer 0: the live code stream. It speeds up while the agent is thinking.
+        // Layer 0: ambient light. A soft radial wash plus a top band, so the interface reads as
+        // an illuminated panel rather than black text on a black screen.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithCache {
+                    val wash = Brush.radialGradient(
+                        colors = listOf(
+                            HUD.Blood.copy(alpha = 0.30f),
+                            HUD.Void.copy(alpha = 0.55f),
+                            HUD.Black
+                        ),
+                        center = Offset(size.width / 2f, size.height * 0.34f),
+                        radius = size.height * 0.80f
+                    )
+                    val band = Brush.verticalGradient(
+                        colors = listOf(HUD.Blood.copy(alpha = 0.22f), Color.Transparent),
+                        endY = size.height * 0.28f
+                    )
+                    onDrawBehind {
+                        drawRect(wash)
+                        drawRect(band)
+                    }
+                }
+        )
+
+        // Layer 1: the live code stream. It speeds up while the agent is thinking.
         CodeStreamBackground(
             fast = state == AgentState.THINKING,
             transparency = config.transparency,
@@ -221,7 +251,7 @@ private fun TopBar(
                     Text(
                         text = "‹ CORE",
                         color = HUD.Blood,
-                        fontSize = 12.sp,
+                        fontSize = 16.sp,
                         fontFamily = FontFamily.Monospace,
                         letterSpacing = 1.4.sp,
                         modifier = Modifier
@@ -233,24 +263,24 @@ private fun TopBar(
                 Text(
                     text = "SEEMA_JARVIS",
                     color = HUD.Blood,
-                    fontSize = 16.sp,
+                    fontSize = 22.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
-                    letterSpacing = 4.5.sp
+                    letterSpacing = 2.sp
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = clock,
                     color = HUD.Gold,
-                    fontSize = 17.sp,
+                    fontSize = 23.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.sp
                 )
                 Text(
                     text = protocol.title + " · " + protocol.subtitle,
                     color = HUD.TextMuted,
-                    fontSize = 11.sp,
+                    fontSize = 15.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.2.sp
                 )
@@ -258,7 +288,10 @@ private fun TopBar(
         }
         Spacer(Modifier.height(10.dp))
         if (tab == Tab.HOME) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 HudProtocol.entries.forEach { entry ->
                     ProtocolChip(
                         label = entry.title,
@@ -270,7 +303,7 @@ private fun TopBar(
                 Text(
                     text = state.hudLabel(),
                     color = state.hudColor(),
-                    fontSize = 11.sp,
+                    fontSize = 15.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.6.sp,
                     modifier = Modifier.padding(top = 6.dp)
@@ -287,7 +320,7 @@ private fun ProtocolChip(label: String, active: Boolean, onClick: () -> Unit) {
     Text(
         text = label,
         color = if (active) HUD.Black else HUD.BloodDim,
-        fontSize = 11.sp,
+        fontSize = 15.sp,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Medium,
         letterSpacing = 1.4.sp,
@@ -304,7 +337,7 @@ private fun ProtocolChip(label: String, active: Boolean, onClick: () -> Unit) {
 private fun TalkPill(micGranted: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .size(62.dp)
+            .size(80.dp)
             .clip(CircleShape)
             .background(HUD.Blood.copy(alpha = 0.16f))
             .border(1.dp, HUD.Blood, CircleShape)
@@ -314,7 +347,7 @@ private fun TalkPill(micGranted: Boolean, onClick: () -> Unit, modifier: Modifie
         Text(
             text = if (micGranted) "TALK" else "GRANT",
             color = HUD.Blood,
-            fontSize = 11.sp,
+            fontSize = 15.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
             letterSpacing = 1.4.sp
@@ -351,13 +384,13 @@ private fun FileRow(file: File) {
         Text(
             text = file.name,
             color = HUD.TextPrimary,
-            fontSize = 15.sp,
+            fontSize = 20.sp,
             fontFamily = FontFamily.Monospace
         )
         Text(
             text = humanSize(file.length()),
             color = HUD.TextMuted,
-            fontSize = 14.sp,
+            fontSize = 19.sp,
             fontFamily = FontFamily.Monospace
         )
     }
@@ -381,7 +414,7 @@ private fun CodingPage(config: SeemaConfig, state: AgentState, modifier: Modifie
             Text(
                 text = line,
                 color = HUD.TextMuted,
-                fontSize = 14.sp,
+                fontSize = 19.sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(vertical = 3.dp)
             )
@@ -397,12 +430,12 @@ private fun TerminalPage(
 ) {
     var input by remember { mutableStateOf("") }
     PageScaffold(title = "COMMAND TERMINAL", subtitle = "DIRECT LINK TO CORE", modifier = modifier) {
-        Column(Modifier.fillMaxWidth().height(210.dp).verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxWidth().height(300.dp).verticalScroll(rememberScrollState())) {
             if (logs.isEmpty()) {
                 Text(
                     "› awaiting first command",
                     color = HUD.TextMuted,
-                    fontSize = 14.sp,
+                    fontSize = 19.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }
@@ -410,7 +443,7 @@ private fun TerminalPage(
                 Text(
                     text = "› $line",
                     color = HUD.TextPrimary,
-                    fontSize = 14.sp,
+                    fontSize = 19.sp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
@@ -427,12 +460,12 @@ private fun TerminalPage(
                 .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("›", color = HUD.Blood, fontSize = 16.sp, fontFamily = FontFamily.Monospace)
+            Text("›", color = HUD.Blood, fontSize = 22.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = input,
                 onValueChange = { input = it },
-                textStyle = TextStyle(color = HUD.TextPrimary, fontSize = 16.sp, fontFamily = FontFamily.Monospace),
+                textStyle = TextStyle(color = HUD.TextPrimary, fontSize = 22.sp, fontFamily = FontFamily.Monospace),
                 cursorBrush = SolidColor(HUD.Blood),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -449,7 +482,7 @@ private fun TerminalPage(
         Text(
             text = "TYPE A COMMAND AND PRESS ENTER",
             color = HUD.TextMuted.copy(alpha = 0.6f),
-            fontSize = 11.sp,
+            fontSize = 15.sp,
             fontFamily = FontFamily.Monospace,
             letterSpacing = 1.6.sp
         )
@@ -470,7 +503,7 @@ private fun ProfilePage(state: AgentState, serviceRunning: Boolean, modifier: Mo
         Text(
             text = "OWNER · FULL ACCESS\nLOCAL STORE ONLY · NO CLOUD SYNC",
             color = HUD.TextMuted,
-            fontSize = 14.sp,
+            fontSize = 19.sp,
             fontFamily = FontFamily.Monospace,
             lineHeight = 21.sp
         )
@@ -493,9 +526,9 @@ private fun PageScaffold(
         Text(
             text = subtitle,
             color = HUD.TextMuted,
-            fontSize = 11.sp,
+            fontSize = 15.sp,
             fontFamily = FontFamily.Monospace,
-            letterSpacing = 1.11.sp
+            letterSpacing = 1.15.sp
         )
         Spacer(Modifier.height(16.dp))
         content()
@@ -509,11 +542,11 @@ private fun StatusRow(label: String, value: String, ok: Boolean) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, color = HUD.TextMuted, fontSize = 14.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.2.sp)
+        Text(label, color = HUD.TextMuted, fontSize = 19.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.2.sp)
         Text(
             value,
             color = if (ok) HUD.Online else HUD.BloodDim,
-            fontSize = 14.sp,
+            fontSize = 19.sp,
             fontFamily = FontFamily.Monospace
         )
     }
@@ -521,7 +554,7 @@ private fun StatusRow(label: String, value: String, ok: Boolean) {
 
 @Composable
 private fun EmptyLine(text: String) {
-    Text(text, color = HUD.TextMuted, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+    Text(text, color = HUD.TextMuted, fontSize = 19.sp, fontFamily = FontFamily.Monospace)
 }
 
 // ---------------------------------------------------------------------------------- utilities

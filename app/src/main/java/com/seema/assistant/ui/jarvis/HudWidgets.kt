@@ -57,10 +57,10 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
         Text(
             text = text,
             color = HUD.BloodDim,
-            fontSize = 12.sp,
+            fontSize = 16.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
-            letterSpacing = 3.sp
+            letterSpacing = 1.6.sp
         )
         androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(HUD.Hairline))

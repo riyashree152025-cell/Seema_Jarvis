@@ -36,7 +36,7 @@ fun CodeStreamBackground(
 ) {
     val measurer = rememberTextMeasurer()
     val style = remember {
-        TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+        TextStyle(fontFamily = FontFamily.Monospace, fontSize = 19.sp)
     }
     val layouts = remember(measurer) {
         CODE_LINES.map { measurer.measure(it, style) }
@@ -57,7 +57,7 @@ fun CodeStreamBackground(
 
     // More transparency means a fainter stream: the setting is "glass transparency", so it has
     // to affect what sits behind the glass as well.
-    val alpha = (0.34f - transparency * 0.12f).coerceIn(0.14f, 0.34f)
+    val alpha = (0.60f - transparency * 0.18f).coerceIn(0.34f, 0.60f)
 
     Canvas(modifier = modifier) {
         if (layouts.isEmpty()) return@Canvas
