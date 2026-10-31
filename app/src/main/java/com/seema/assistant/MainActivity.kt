@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.StatusBarManager
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
@@ -55,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,6 +65,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -228,7 +231,14 @@ fun SeemaScreen(
 ) {
     val displayState = if (micGranted) state else AgentState.IDLE
     var showSettings by rememberSaveable { mutableStateOf(false) }
-    var tactical by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Tactical (radar + globe) is the default view; the last choice is remembered.
+    val uiPrefs = remember { context.getSharedPreferences("seema_ui", Context.MODE_PRIVATE) }
+    var tactical by remember { mutableStateOf(uiPrefs.getBoolean(KEY_TACTICAL, true)) }
+    // The wake word that actually works: "Seema" once seema.onnx is added, else "Hey Jarvis".
+    val wakeWord = remember {
+        if (context.assets.list("")?.contains("seema.onnx") == true) "SEEMA" else "HEY JARVIS"
+    }
     if (showSettings) VoiceSettingsDialog(onDismiss = { showSettings = false })
 
     Box(
@@ -267,7 +277,10 @@ fun SeemaScreen(
                     color = JarvisCyan,
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .clickable { tactical = !tactical }
+                        .clickable {
+                            tactical = !tactical
+                            uiPrefs.edit().putBoolean(KEY_TACTICAL, tactical).apply()
+                        }
                         .padding(8.dp)
                 )
                 // Voice settings
@@ -319,7 +332,7 @@ fun SeemaScreen(
                 )
             }
 
-            ResponsePanel(lastResponse = lastResponse)
+            ResponsePanel(lastResponse = lastResponse, wakeWord = wakeWord)
         }
     }
 }
@@ -434,7 +447,7 @@ private fun HudButton(label: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ResponsePanel(lastResponse: String) {
+private fun ResponsePanel(lastResponse: String, wakeWord: String) {
     val shape = RoundedCornerShape(4.dp)
     Box(
         modifier = Modifier
@@ -445,7 +458,7 @@ private fun ResponsePanel(lastResponse: String) {
             .padding(16.dp)
     ) {
         Text(
-            text = if (lastResponse.isBlank()) "> AWAITING WAKE WORD \"SEEMA\"_" else "> $lastResponse",
+            text = if (lastResponse.isBlank()) "> AWAITING WAKE WORD \"$wakeWord\"_" else "> $lastResponse",
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
             textAlign = TextAlign.Start,
@@ -485,3 +498,5 @@ private fun DrawScope.drawHud() {
         drawLine(bracket, p, Offset(p.x, p.y + len * dir.y), w)
     }
 }
+
+private const val KEY_TACTICAL = "tactical"
