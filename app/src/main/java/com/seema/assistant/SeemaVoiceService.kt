@@ -21,6 +21,14 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.rementia.openwakeword.lib.WakeWordEngine
+import com.seema.assistant.apikeys.data.ApiProvider
+import com.seema.assistant.router.ChatRequest
+import com.seema.assistant.router.ChatResult
+import com.seema.assistant.router.MultiProviderRouter
+import com.seema.assistant.router.ProviderTarget
+import com.seema.assistant.router.asTarget
+import com.seema.assistant.router.failureSummary
+import com.seema.assistant.router.outOfQuota
 import com.seema.assistant.ui.jarvis.SeemaConfig
 import com.seema.assistant.ui.jarvis.SeemaConfigStore
 import com.rementia.openwakeword.lib.model.DetectionMode
@@ -76,6 +84,14 @@ class SeemaVoiceService : Service() {
     private lateinit var callAnnouncer: CallAnnouncer
     private lateinit var powerTriggers: PowerTriggerMonitor
     private lateinit var offlineBrain: OfflineBrain
+    /**
+     * The conversational fallback chain, shared process-wide so the HUD badge binds to the same
+     * [MultiProviderRouter.state] the voice service writes.
+     *
+     * Only conversational turns go through it: the router cannot call the phone's tools, so anything
+     * that has to touch the device still goes to [SeemaAgent].
+     */
+    private val router by lazy { MultiProviderRouter.of(this) }
     /** Read live, so changes saved in Settings apply without restarting the service. */
     private val voiceSettings by lazy { VoiceSettings(this) }
     private lateinit var audioManager: AudioManager
@@ -614,77 +630,165 @@ class SeemaVoiceService : Service() {
         }
     }
 
-    /** Runs [command] through the agent and speaks the reply. Returns false if the agent failed. */
+    /**
+     * Runs [command] through the brain chain and speaks the reply.
+     *
+     * The chain is owned by [MultiProviderRouter] now. Gemini Flash is still tried first unless the
+     * user pinned another engine, because [SeemaAgent] is the only brain with the phone's tools;
+     * everything behind it (Groq, Cerebras, OpenRouter) is a conversational fallback — exactly what
+     * `GroqBrain` used to be, minus the single-provider limit and the `"ERROR:"` prose sniffing.
+     *
+     * Returns false only when nothing could answer and the turn has to end with an error.
+     */
     private suspend fun handleCommand(command: String): Boolean {
         SeemaState.update(AgentState.THINKING)
         SeemaState.setResponse("YOU: $command")
-        updateNotification("Thinking…")
+        updateNotification("Thinking...")
 
-        // No internet: answer basic commands locally. Also used if the agent failed because the
-        // connection dropped mid-request.
         val config = SeemaConfigStore(this).load()
-        // An optional second brain. The Gemini free tier allows only 20 requests a day, so a Groq
-        // key is what keeps the assistant conversational once that is spent.
+        // A stored Groq key is the legacy signal that a second, conversational brain exists: it lets
+        // the router hand a failed Gemini turn over in seconds instead of waiting out the 25 s
+        // no-fallback budget, and it is also what the pinned-Groq engine needs to be usable at all.
         val groqReady = SeemaConfigBridge.groqKey(this).isNotBlank()
-        // Lets the agent shorten its own timeout: a dead primary should cost seconds, not 25.
         SeemaAgent.fallbackAvailable = groqReady
+
         // The HUD's code stream stays hidden unless real work is running, so the flag is raised
         // only for turns that actually generate code, scrape a page or write a file.
         val autonomous = isAutonomousWork(command)
         if (autonomous) SeemaWorkStream.begin("AUTONOMOUS TASK")
-        var offline = !NetworkStatus.isOnline(this) || config.localBrain
-        var reply = when {
-            offline -> offlineBrain.handle(command)
-            // Groq cannot call the phone's tools, so it is offered only as a conversational brain.
-            config.aiEngine == SeemaConfig.ENGINE_GROQ && groqReady -> {
-                val groq = GroqBrain.ask(this, SeemaAgent.conversationalPrompt(), command)
-                if (!groq.startsWith("ERROR:")) groq else SeemaAgent.runAgent(command)
+
+        // No internet, or the user chose the local brain: answer basic commands locally. The same
+        // path is reused below when every provider fails, because the basics should not stop working
+        // just because a quota ran out.
+        val localBrain = config.localBrain
+        val localOnly = localBrain || !NetworkStatus.isOnline(this)
+        var turn: SpokenTurn? = null
+        var exhausted: ChatResult.AllFailed? = null
+        var geminiQuota = false
+
+        if (localOnly) {
+            turn = SpokenTurn(
+                text = offlineBrain.handle(command),
+                note = if (localBrain) LOCAL_BRAIN_NOTE else OFFLINE_NOTE,
+            )
+        } else if (config.aiEngine == SeemaConfig.ENGINE_GROQ && groqReady) {
+            // The user pinned Groq as the conversational brain, and a Groq key is actually stored.
+            // The router still falls back through the other configured providers; the tool agent
+            // stays the last resort, as before. Without a key this branch is skipped so a
+            // tool-carrying turn still reaches Gemini rather than a tool-less conversation.
+            when (val routed = router.executeChat(conversationalRequest(command), ApiProvider.GROQ.id)) {
+                is ChatResult.Success -> turn = routedTurn(routed, requested = ApiProvider.GROQ.asTarget())
+                is ChatResult.AllFailed -> {
+                    val agentReply = SeemaAgent.runAgent(command)
+                    if (agentReply.startsWith(ERROR_PREFIX)) {
+                        exhausted = routed
+                        geminiQuota = SeemaAgent.isQuotaError(agentReply)
+                    } else {
+                        turn = SpokenTurn(agentReply, ApiProvider.GEMINI.asTarget())
+                    }
+                }
             }
-            else -> {
-                val gemini = SeemaAgent.runAgent(command)
-                if (gemini.startsWith("ERROR:") && groqReady) {
-                    val groq = GroqBrain.ask(this, SeemaAgent.conversationalPrompt(), command)
-                    if (!groq.startsWith("ERROR:")) groq else gemini
+        } else {
+            // Gemini Flash keeps the phone's tools, so it is tried first.
+            val agentReply = SeemaAgent.runAgent(command)
+            if (!agentReply.startsWith(ERROR_PREFIX)) {
+                turn = SpokenTurn(agentReply, ApiProvider.GEMINI.asTarget())
+            } else {
+                Log.w(TAG, "Gemini tool agent failed: $agentReply")
+                geminiQuota = SeemaAgent.isQuotaError(agentReply)
+                // A quota refusal or a missing key is a verdict on the credential, so the sweep
+                // starts at the next provider. Anything else may be transient, so Gemini stays in
+                // the sweep and gets one conversational retry with a fresh request.
+                val geminiDead = geminiQuota || AiSettings(this).effectiveApiKey.isBlank()
+                val first = if (geminiDead) {
+                    // The configured rotation, minus Gemini and minus any custom provider: the sweep
+                    // the router is about to run already appends the user's custom providers, and this
+                    // id only decides which *built-in* goes first.
+                    router.priority.firstOrNull { it.builtIn != ApiProvider.GEMINI }
                 } else {
-                    gemini
+                    null
+                }
+                when (val routed = router.executeChat(conversationalRequest(command), first?.id)) {
+                    is ChatResult.Success -> turn = routedTurn(routed, requested = first)
+                    is ChatResult.AllFailed -> exhausted = routed
                 }
             }
         }
+
         if (autonomous) SeemaWorkStream.end()
-        var note = when {
-            config.localBrain -> "⚠ LOCAL BRAIN"
-            offline -> "⚠ OFFLINE"
-            else -> ""
-        }
-        when {
-            // Gemini's quota for this API key is used up (free tier resets daily): basics still work.
-            SeemaAgent.isQuotaError(reply) -> {
-                Log.w(TAG, "Gemini quota exhausted: $reply")
-                offline = true
-                note = "⚠ GEMINI QUOTA USED UP — BASIC MODE (free tier resets daily)"
-                reply = offlineBrain.handle(command)
+
+        // Nothing remote answered. Decide between "the basics still work" and a real outage; the
+        // router's typed failures carry the verdict, so no prose parsing is needed here any more.
+        var answer = turn
+        if (answer == null) {
+            val quota = geminiQuota || exhausted?.outOfQuota() == true
+            val onlineNow = NetworkStatus.isOnline(this)
+            if (quota || !onlineNow) {
+                answer = SpokenTurn(
+                    text = offlineBrain.handle(command),
+                    note = if (quota) QUOTA_NOTE else OFFLINE_NOTE,
+                )
+            } else {
+                val summary = exhausted?.failureSummary().orEmpty()
+                Log.w(TAG, "Every brain failed: ${summary.ifBlank { "nothing was attempted" }}")
+                SeemaState.setResponse(
+                    buildString {
+                        append("YOU: $command\n\n⚠ $NO_BRAIN_TEXT")
+                        if (summary.isNotBlank()) append("\n$summary")
+                    }
+                )
+                speak(ALL_BRAINS_FAILED_REPLY)
+                holdErrorState()
+                return false
             }
-            !offline && reply.startsWith("ERROR:") && !NetworkStatus.isOnline(this) -> {
-                offline = true
-                note = "⚠ OFFLINE"
-                reply = offlineBrain.handle(command)
-            }
         }
-        Log.i(TAG, "🤖 SEEMA${if (offline) " (offline)" else ""}: $reply")
-        val failed = reply.startsWith("ERROR:")
-        if (failed) {
-            SeemaState.setResponse("YOU: $command\n\n⚠ $NETWORK_ERROR_TEXT\n${reply.removePrefix("ERROR:").trim()}")
-            speak(AGENT_ERROR_REPLY)
-            holdErrorState()
-            return false
-        }
+
+        // A tool turn never reaches the router, so the HUD badge has to be told who answered or it
+        // would keep naming the provider of the last *routed* turn.
+        answer.provider?.let(router::recordExternalReply)
+        val localAnswer = localBrain || !NetworkStatus.isOnline(this)
+        Log.i(TAG, "🤖 SEEMA${if (localAnswer) " (offline)" else ""}: ${answer.text}")
         SeemaState.setResponse(
-            if (note.isBlank()) "YOU: $command\n\nSEEMA: $reply"
-            else "YOU: $command\n\n$note\n\nSEEMA: $reply"
+            if (answer.note.isBlank()) "YOU: $command\n\nSEEMA: ${answer.text}"
+            else "YOU: $command\n\n${answer.note}\n\nSEEMA: ${answer.text}"
         )
-        speak(reply)
+        speak(answer.text)
         return true
     }
+
+    /**
+     * The turn as the router should send it.
+     *
+     * The persona is [SeemaAgent.conversationalPrompt] — the same tool-less prompt the old Groq path
+     * used — because a fallback brain must be told plainly that it cannot touch the phone, or it
+     * will cheerfully promise to turn on the torch and then do nothing.
+     */
+    private fun conversationalRequest(command: String): ChatRequest =
+        ChatRequest(prompt = command, systemPrompt = SeemaAgent.conversationalPrompt())
+
+    /**
+     * A router success as a spoken turn, with a note naming the brain when it was not the one that
+     * was asked first.
+     *
+     * The note is only set on a hand-over: repeating "BRAIN: GROQ" on every turn the pinned brain
+     * answered would be noise, but when a later provider takes over the user should be able to see
+     * why the voice changed.
+     *
+     * Both sides of the comparison are [ProviderTarget]s, not enum constants, so a turn that a
+     * user-added custom provider rescued still reports which provider actually answered — comparing a
+     * custom target against a built-in one is simply unequal, which is exactly the hand-over the note
+     * is for.
+     */
+    private fun routedTurn(result: ChatResult.Success, requested: ProviderTarget?): SpokenTurn =
+        SpokenTurn(
+            text = result.completion.text,
+            provider = result.completion.target,
+            note = if (requested == null || result.completion.target != requested) {
+                "$BRAIN_NOTE_PREFIX${result.completion.target.displayName.uppercase(Locale.ROOT)}"
+            } else {
+                ""
+            },
+        )
 
     /** Shows [message] in the red ERROR state for a moment (used when nothing will be spoken). */
     private suspend fun showError(message: String) {
@@ -873,10 +977,25 @@ class SeemaVoiceService : Service() {
         private const val ERROR_HOLD_MS = 3_000L
         private const val NETWORK_ERROR_TEXT = "Network Error. Please try again."
 
+        /** Every [SeemaAgent] failure starts with this; it is the one place that convention is read. */
+        private const val ERROR_PREFIX = "ERROR:"
+
+        private const val LOCAL_BRAIN_NOTE = "⚠ LOCAL BRAIN"
+        private const val OFFLINE_NOTE = "⚠ OFFLINE"
+
+        /** Shown with a reply when a later provider took the turn, so the voice change is visible. */
+        private const val BRAIN_NOTE_PREFIX = "⚡ BRAIN: "
+
+        /** Set when the free tiers are spent: the basics still answer, so the conversation can go on. */
+        private const val QUOTA_NOTE = "⚠ ALL BRAINS OUT OF QUOTA — BASIC MODE (free tiers reset daily)"
+
+        /** The one-line verdict when every provider failed and the basics cannot cover the turn. */
+        private const val NO_BRAIN_TEXT = "ALL BRAINS FAILED"
 
         private const val NO_SPEECH_REPLY = "I didn't catch that."
         private const val STT_ERROR_REPLY = "Sorry, I couldn't hear you properly."
-        private const val AGENT_ERROR_REPLY = "Network error. Please try again."
+        private const val ALL_BRAINS_FAILED_REPLY =
+            "I can't reach any of my brains right now. Check the API keys in settings, or the connection."
         private const val GOODBYE_REPLY = "Anytime. I'll be right here."
         private const val BRIEFING_QUERY = "Good morning! Give me my daily briefing."
 
@@ -912,3 +1031,20 @@ class SeemaVoiceService : Service() {
         private const val DEFAULT_WAKE_WORD_PHRASE = "Hey Jarvis"
     }
 }
+
+/**
+ * One finished turn: what to say, who said it, and the one-line provenance shown with it.
+ *
+ * A small value type rather than three parallel variables, because a reply attributed to the wrong
+ * brain is worse than no attribution: the transcript note and the HUD badge both read these fields.
+ * [provider] is null only when the local/offline brain answered, which has no provider identity.
+ *
+ * It is a [ProviderTarget] rather than an [ApiProvider] so a user-added custom provider that answered
+ * a turn can be named here too; `provider?.builtIn` is how the built-in-only call sites still ask
+ * their question, and it is null for a custom provider.
+ */
+private data class SpokenTurn(
+    val text: String,
+    val provider: ProviderTarget? = null,
+    val note: String = "",
+)

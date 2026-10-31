@@ -91,6 +91,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // Declared explicitly: the API key manager's ViewModel uses viewModelScope/viewModelFactory,
+    // which otherwise arrive only transitively through activity-compose.
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.androidx.activity.compose)
 
@@ -101,6 +104,17 @@ dependencies {
     implementation(libs.androidx.material3)
 
     implementation(libs.kotlinx.coroutines.android)
+
+    // API key manager: encrypted credential storage + provider health probes
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.okhttp)
+    implementation(libs.retrofit)
+
+    // Custom Provider store: user-added providers are persisted as rows, and the Room compiler
+    // generates their DAO implementation at build time through KSP.
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     // Ears: always-on wake word
     implementation(libs.openwakeword)

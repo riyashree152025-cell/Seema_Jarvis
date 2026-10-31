@@ -165,3 +165,31 @@ on. The Groq path has no tool access by design, so device actions stay on Gemini
   no visible text.
 - When a fallback key exists the Gemini timeout drops from 25 s to 8 s with a single retry, so a
   dead primary costs seconds instead of half a minute. Measured fallback: ~3 s to a spoken answer.
+
+---
+
+## UPDATE — phase 4: API Key Manager, Multi-Provider Router
+
+Contributed in a parallel session and verified here before pushing.
+
+### New
+- `apikeys/` — `ApiKeyVault` (encrypted storage), `ApiProvider`, `ProviderKeyRepository`,
+  `ProviderProbeApi` (live health probes), `ProviderStatus`, plus the manager screen and its
+  ViewModel. Keys are stored with `androidx.security:security-crypto 1.1.0-alpha06`; only obvious
+  placeholder strings exist in source, no real key is committed.
+- `router/` — `MultiProviderRouter`, `ChatTransport`, `ChatModels`. Routing is now a typed
+  contract: a failure is a sealed `ProviderFailure` carrying the HTTP status, instead of the old
+  "ERROR:" string convention, so the UI can tell an invalid key from an exhausted quota.
+- `app/src/test/` — 37 JVM unit tests (router ordering/fall-through, outcome text, status mapping).
+- `tools/` — offline verification scripts for the router and a smoke-test harness.
+
+### This session's fix
+- `HudTheme.brainHudLabel()` used trailing commas inside `when` entry conditions, which this
+  toolchain rejects with "Expecting a when-condition"; the build failed. Commas removed.
+- `gradle.properties` gained `android.overridePathCheck=true`, which removes the need to copy the
+  project to an ASCII path before building (the checkout lives under "ドキュメント").
+
+### Verification
+- `assembleDebug`: BUILD SUCCESSFUL
+- `testDebugUnitTest`: 37 tests, 0 failures, 0 skipped
+- Device install not re-tested: the phone was disconnected at the time of this commit.

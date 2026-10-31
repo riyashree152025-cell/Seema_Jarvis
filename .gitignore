@@ -7,6 +7,9 @@ build/
 app/build/
 .kotlin/
 
+# Offline verification output (tools/run-router-tests.ps1); regenerate rather than commit
+build-verify/
+
 # Android Studio
 .idea/
 *.iml

@@ -22,9 +22,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.seema.assistant.router.MultiProviderRouter
 import com.seema.assistant.ui.jarvis.SeemaHudScreen
 import com.seema.assistant.ui.theme.SeemaTheme
 
@@ -74,6 +76,10 @@ class MainActivity : ComponentActivity() {
                 val audioLevel by SeemaState.audioLevel.collectAsStateWithLifecycle()
                 val serviceRunning by SeemaState.serviceRunning.collectAsStateWithLifecycle()
                 val routines by SeemaRoutines.routinesFlow.collectAsStateWithLifecycle()
+                // The router is process-wide, so `remember` only pins *this* composition's
+                // subscription; the badge still tracks whatever the voice service routed last.
+                val routerState by remember { MultiProviderRouter.of(this@MainActivity) }
+                    .state.collectAsStateWithLifecycle()
 
                 SeemaHudScreen(
                     state = state,
@@ -84,7 +90,8 @@ class MainActivity : ComponentActivity() {
                     routineNames = routines.map { it.name },
                     onGrantClick = ::onGrantClick,
                     onTalk = { SeemaState.send(SeemaCommand.START_CONVERSATION) },
-                    onSendText = { text -> SeemaState.sendText(text) }
+                    onSendText = { text -> SeemaState.sendText(text) },
+                    routerState = routerState
                 )
             }
         }

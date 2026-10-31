@@ -2,6 +2,7 @@ package com.seema.assistant.ui.jarvis
 
 import androidx.compose.ui.graphics.Color
 import com.seema.assistant.AgentState
+import com.seema.assistant.router.RouterState
 
 /**
  * Deep Red & Black HUD design system.
@@ -72,6 +73,35 @@ fun AgentState.hudLabel(): String = when (this) {
     AgentState.THINKING -> "PROCESSING"
     AgentState.SPEAKING -> "RESPONDING"
     AgentState.ERROR -> "FAULT"
+}
+
+/**
+ * Text of the router's brain badge, e.g. `"Brain: Groq"`.
+ *
+ * The base string stays on [RouterState.brainLabel] so every surface that shows a brain cannot drift
+ * apart on the provider name. Only the routing status is appended here, because the label
+ * names the provider that served the *last* turn: without a suffix it would read as "Groq is answering
+ * right now" while a fresh sweep is still falling through providers, or after every provider refused.
+ */
+fun RouterState.brainHudLabel(): String = when (status) {
+    RouterState.Status.ROUTING -> "$brainLabel · ROUTING"
+    RouterState.Status.EXHAUSTED -> "$brainLabel · ALL FAILED"
+    RouterState.Status.READY, RouterState.Status.IDLE -> brainLabel
+}
+
+/**
+ * Colour of the brain badge, keyed to [RouterState.status] rather than to the provider.
+ *
+ * A provider's identity says nothing about its health: Groq is the right badge on a served turn and
+ * the same badge after that provider outlived a failed sweep. Colouring by status keeps the strip
+ * honest — green only while the last turn was actually served, amber while a sweep is in flight, red
+ * once every provider has refused — and leaves the provider to name itself in the text.
+ */
+fun RouterState.brainHudColor(): Color = when (status) {
+    RouterState.Status.READY -> HUD.Online
+    RouterState.Status.ROUTING -> HUD.Warn
+    RouterState.Status.EXHAUSTED -> HUD.Danger
+    RouterState.Status.IDLE -> HUD.TextMuted
 }
 
 /** Which HUD protocol is on screen. */

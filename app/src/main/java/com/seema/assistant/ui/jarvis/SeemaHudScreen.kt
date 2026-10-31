@@ -54,6 +54,7 @@ import com.seema.assistant.SeemaMemory
 import com.seema.assistant.SeemaState
 import com.seema.assistant.SeemaWorkStream
 import com.seema.assistant.SeemaRoutines
+import com.seema.assistant.router.RouterState
 import java.io.File
 import java.time.LocalTime
 import kotlinx.coroutines.delay
@@ -68,6 +69,9 @@ private enum class Tab { HOME, SETTINGS, FILES, CODING, TERMINAL, PROFILE }
  * pages over it and a "‹ CORE" affordance brings the user back, so the reactor is never more
  * than one tap away. Protocol switching only changes what HOME renders, never the chrome, which
  * keeps the three views feeling like modes of one machine rather than three separate apps.
+ *
+ * @param routerState the live router state, so the status strip can badge which brain is answering
+ *   even though this screen is never the caller that ran the turn.
  */
 @Composable
 fun SeemaHudScreen(
@@ -79,7 +83,8 @@ fun SeemaHudScreen(
     routineNames: List<String>,
     onGrantClick: () -> Unit,
     onTalk: () -> Unit,
-    onSendText: (String) -> Unit
+    onSendText: (String) -> Unit,
+    routerState: RouterState
 ) {
     val context = LocalContext.current
     val configState = remember { SeemaConfigState(context) }
@@ -153,6 +158,7 @@ fun SeemaHudScreen(
                 protocol = protocol,
                 clock = clock,
                 state = state,
+                routerState = routerState,
                 onBack = { tab = Tab.HOME },
                 onProtocol = { protocol = it }
             )
@@ -244,6 +250,7 @@ private fun TopBar(
     protocol: HudProtocol,
     clock: String,
     state: AgentState,
+    routerState: RouterState,
     onBack: () -> Unit,
     onProtocol: (HudProtocol) -> Unit
 ) {
@@ -310,6 +317,15 @@ private fun TopBar(
                 Text(
                     text = state.hudLabel(),
                     color = state.hudColor(),
+                    fontSize = 15.sp,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.6.sp,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = routerState.brainHudLabel(),
+                    color = routerState.brainHudColor(),
                     fontSize = 15.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.6.sp,
