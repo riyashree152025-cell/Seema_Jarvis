@@ -31,7 +31,13 @@ enum class SeemaCommand {
     DAILY_BRIEFING,
 
     /** Fake barge-in: stop speaking now and end the turn (notification "Stop", in-app button). */
-    STOP
+    STOP,
+
+    /**
+     * The configuration screen saved something that changes how the service behaves (wake word
+     * on/off, sensitivity, brain choice). The service re-reads the config and re-arms.
+     */
+    RELOAD_CONFIG
 }
 
 /** Shared state between SeemaVoiceService and the UI. */

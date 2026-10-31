@@ -104,3 +104,31 @@ git checkout 85ef7a2 -- .  # या नया branch
 5. Senses (accessibility screen reading, calendar, web search)
 
 विस्तार `ROADMAP.md` में।
+---
+
+## UPDATE — phase 2: capabilities wired, readability pass
+
+### Readability (user feedback)
+Every font in the HUD raised one step (8→11, 9→12, 10→14, 11→15, 12→16, 13→17sp), the
+palette lifted out of near-black, muted text brightened from #8A6F73 to #D2AEB5, glass
+edges and hairlines strengthened, and the code stream made ~2x more visible. Default glow
+raised to 0.85.
+
+### Now genuinely functional (not just UI)
+| Feature | Status |
+|---|---|
+| Wake word ON/OFF + sensitivity | Real. OFF tears down the ONNX engine and its AudioRecord. Measured on a Galaxy A14: **266% -> 100% CPU foreground, 0% in background**, memory 228MB -> 171MB, GC events 24/10s -> **0** |
+| Local Brain toggle | Real. Bypasses the cloud entirely |
+| AI engine dropdown | Real. Groq LPU routes conversation to Groq; Gemini Flash keeps the 54 device tools |
+| Groq fallback | Real. When Gemini returns an error (e.g. the 20/day free-tier quota), Groq answers instead of dropping to canned offline replies |
+| Groq API key field | Real, masked, stored in the AI preference file |
+| Colour profile | Real. Changes the reactor's resting glow (Deep Red / Crimson / Obsidian) |
+| Glow, Transparency, Smooth reactor | Real, live |
+| Screen Context | Real. Accessibility service reads on-screen text; readScreen and findOnScreen tools registered and enabled |
+| Web search | Real. Keyless DuckDuckGo, gated by the Autonomous Web Search toggle |
+| Permission onboarding | Overlay, notification access, background location and accessibility all requested in waves |
+
+### Still not implemented
+Autonomous code generation and website deployment are configuration only (no generator or
+deploy backend exists). Automation Scripts and Gesture Activation are stored but not acted
+on. The Groq path has no tool access by design, so device actions stay on Gemini.

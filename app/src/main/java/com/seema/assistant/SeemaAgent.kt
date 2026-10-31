@@ -13,6 +13,7 @@ import com.google.adk.kt.types.Role
 import com.google.genai.Client
 import com.google.genai.types.HttpOptions
 import com.google.genai.types.HttpRetryOptions
+import com.seema.assistant.ui.jarvis.SeemaConfigStore
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -107,6 +108,13 @@ object SeemaAgent {
           "Timer for 10 minutes" means setTimer with 600 seconds. If the user says only
           "alarm for 7" and it is unclear whether AM or PM, ask.
           To delete or change alarms, use showAlarms; you cannot delete them yourself.
+        - webSearch for anything that may have changed recently: news, prices, scores, or any
+          fact you are not sure about. Prefer searching over guessing, and say when an answer
+          came from the web rather than from memory.
+        - readScreen and findOnScreen answer questions about what is on the screen ("what does
+          this say", "is there a pay button", "summarise this page"). If one returns status
+          "needs_user", tell the user to switch on Screen Context in the app settings and enable
+          SEEMA under Accessibility.
         Calls and messages must never go to the wrong person:
         - Always run findContacts first when the user names a person. Use only numbers it
           returns, or digits the user dictated. Never invent a number.
@@ -148,6 +156,14 @@ object SeemaAgent {
     private fun buildAgent(context: Context, apiKey: String, model: String): LlmAgent {
         val clockTools = SeemaClockTools(context)
         val weatherTools = SeemaWeatherTools(context)
+        // Two capabilities are switchable in the configuration screen, and both cost something:
+        // a web search leaves the phone, and screen reading only works once the user has enabled
+        // the accessibility service. They are added to the tool list only when switched on, so
+        // the model is never told it can do something that is actually turned off.
+        val config = SeemaConfigStore(context).load()
+        val optionalTools =
+            (if (config.webSearch) SeemaWebTools(context).generatedTools() else emptyList()) +
+                (if (config.screenContext) SeemaScreenTools(context).generatedTools() else emptyList())
         return LlmAgent(
             name = "Seema",
             description = "Personal JARVIS-style voice assistant.",
@@ -167,7 +183,8 @@ object SeemaAgent {
                 SeemaPlaceTools(context).generatedTools() +
                 SeemaProactiveTools(context).generatedTools() +
                 SeemaRoutineTools(context).generatedTools() +
-                SeemaTriggerTools(context).generatedTools()
+                SeemaTriggerTools(context).generatedTools() +
+                optionalTools
         )
     }
 
@@ -178,7 +195,10 @@ object SeemaAgent {
     // InMemoryRunner creates the session on first use, so conversation memory lasts until
     // resetConversation(), a key/model change, or the process dies.
     private fun runner(context: Context, apiKey: String, model: String): InMemoryRunner {
-        val config = "$model|$apiKey"
+        val hud = SeemaConfigStore(context).load()
+        // Tool availability is part of the agent's identity: toggling web search or screen context
+        // must rebuild it, otherwise the model keeps answering with yesterday's tool list.
+        val config = "$model|$apiKey|${hud.webSearch}|${hud.screenContext}"
         cachedRunner?.takeIf { runnerConfig == config }?.let { return it }
         return InMemoryRunner(agent = buildAgent(context, apiKey, model), appName = APP_NAME).also {
             cachedRunner = it
@@ -282,6 +302,37 @@ object SeemaAgent {
     /** Starts a fresh conversation with no memory of earlier turns. */
     fun resetConversation() {
         sessionId = newSessionId()
+    }
+
+    /**
+     * The instruction block for a brain that has NO access to the phone's tools.
+     *
+     * Used by the Groq fallback: it must not be told about forty device actions it cannot call,
+     * or it will promise to turn on the torch and then do nothing. The tool list is stripped and
+     * the model is told plainly what it can and cannot do.
+     */
+    fun conversationalPrompt(): String = buildString {
+        append(
+            """
+            You are SEEMA, a personal AI assistant on the owner's Android phone, inspired by JARVIS.
+            Your replies are spoken aloud, so: answer in 1 to 3 short sentences, no markdown, no
+            bullet points, no emoji, no code blocks.
+            You are running in a reduced mode with NO access to the phone's hardware or apps. You
+            cannot make calls, send messages, set alarms, control the torch, read notifications or
+            open apps. If the user asks for any of those, say briefly that this mode cannot do it
+            and that the Gemini engine handles device control.
+            Never claim you performed an action. Answer questions, explain, suggest, and hold a
+            conversation. If you do not know something recent, say so plainly instead of guessing.
+            If the user speaks Hindi or Hinglish, reply in the same language.
+            """.trimIndent()
+        )
+        append("\n\nCurrent local time: ")
+        append(ZonedDateTime.now().format(NOW_FORMAT))
+        val memories = SeemaMemory.all().takeLast(20)
+        if (memories.isNotEmpty()) {
+            append("\n\nThings you remember about the user:")
+            memories.forEach { append("\n- ${it.text}") }
+        }
     }
 
     private suspend fun collectReply(runner: InMemoryRunner, userQuery: String, toolsCalled: AtomicBoolean): String {

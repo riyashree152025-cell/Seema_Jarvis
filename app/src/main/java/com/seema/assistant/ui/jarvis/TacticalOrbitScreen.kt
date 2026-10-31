@@ -80,8 +80,8 @@ private fun Header() {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text("MARK-II", color = HUD.BloodDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace, letterSpacing = 3.sp)
-        Text("TACTICAL ORBIT", color = HUD.BloodDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace, letterSpacing = 3.sp)
+        Text("MARK-II", color = HUD.BloodDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, letterSpacing = 3.sp)
+        Text("TACTICAL ORBIT", color = HUD.BloodDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, letterSpacing = 3.sp)
     }
 }
 
@@ -110,7 +110,7 @@ private fun GlobeCanvas(spin: Float, color: Color, modifier: Modifier = Modifier
 
         // ---- atmosphere halo
         for (i in 4 downTo 1) {
-            drawCircle(color.copy(alpha = 0.020f), radius = radius * (1f + i * 0.18f), center = Offset(cx, cy))
+            drawCircle(color.copy(alpha = 0.045f), radius = radius * (1f + i * 0.18f), center = Offset(cx, cy))
         }
 
         // ---- latitude rings
@@ -197,16 +197,16 @@ private fun TelemetryColumn(feed: Float, state: AgentState, modifier: Modifier =
             Text(
                 text = "$label  $value",
                 color = HUD.TextMuted,
-                fontSize = 8.sp,
+                fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.8.sp
+                letterSpacing = 0.11.sp
             )
         }
         Spacer(Modifier.height(6.dp))
         Text(
             text = state.hudLabel(),
             color = state.hudColor(),
-            fontSize = 8.sp,
+            fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             letterSpacing = 1.4.sp
         )
@@ -222,7 +222,7 @@ private fun OrbitLog(logLines: List<String>) {
                 Text(
                     text = "› $line",
                     color = HUD.TextMuted,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

@@ -240,5 +240,20 @@
             </intent-filter>
         </service>
 
+        <!-- Screen Context. Reads on-screen text only while the user has it enabled in system
+             settings; the app cannot grant this to itself. -->
+        <service
+            android:name=".SeemaAccessibilityService"
+            android:exported="true"
+            android:label="SEEMA Screen Context"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/seema_accessibility_config" />
+        </service>
+
     </application>
 </manifest>

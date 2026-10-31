@@ -57,7 +57,16 @@ fun ReactorHud(
     config: SeemaConfig,
     modifier: Modifier = Modifier
 ) {
-    val color by animateColorAsState(state.hudColor(), tween(600), label = "reactor")
+    // The colour profile decides the resting glow; warning, error and speech states always win 
+    // over it, because those colours carry meaning the user relies on.
+    val profile = ColourProfile.from(config.colorProfile)
+    val effective = when (state) {
+        AgentState.THINKING -> HUD.Warn
+        AgentState.ERROR -> HUD.Danger
+        AgentState.SPEAKING -> HUD.Online
+        else -> profile.accent
+    }
+    val color by animateColorAsState(effective, tween(600), label = "reactor")
     val glow = config.glowIntensity.coerceIn(0f, 1f)
     val fast = state == AgentState.THINKING || state == AgentState.SPEAKING
 
@@ -81,7 +90,7 @@ fun ReactorHud(
                 Text(
                     text = state.hudLabel(),
                     color = color.copy(alpha = 0.92f),
-                    fontSize = 10.sp,
+                    fontSize = 14.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 7.sp
@@ -136,7 +145,7 @@ private fun ReactorCore(
         // ---- outer halo: layered flat discs, no per-frame shader
         for (i in 6 downTo 1) {
             drawCircle(
-                color = color.copy(alpha = 0.022f + glow * 0.018f),
+                color = color.copy(alpha = 0.050f + glow * 0.030f),
                 radius = r * (1f + i * 0.42f),
                 center = Offset(cx, cy)
             )
@@ -194,14 +203,14 @@ private fun ReactorCore(
 
         // ---- crosshair
         val cross = r * 1.55f
-        drawLine(color.copy(alpha = 0.10f), Offset(cx - cross, cy), Offset(cx - r * 1.46f, cy), 1f)
-        drawLine(color.copy(alpha = 0.10f), Offset(cx + r * 1.46f, cy), Offset(cx + cross, cy), 1f)
-        drawLine(color.copy(alpha = 0.10f), Offset(cx, cy - cross), Offset(cx, cy - r * 1.46f), 1f)
-        drawLine(color.copy(alpha = 0.10f), Offset(cx, cy + r * 1.46f), Offset(cx, cy + cross), 1f)
+        drawLine(color.copy(alpha = 0.22f), Offset(cx - cross, cy), Offset(cx - r * 1.46f, cy), 1f)
+        drawLine(color.copy(alpha = 0.22f), Offset(cx + r * 1.46f, cy), Offset(cx + cross, cy), 1f)
+        drawLine(color.copy(alpha = 0.22f), Offset(cx, cy - cross), Offset(cx, cy - r * 1.46f), 1f)
+        drawLine(color.copy(alpha = 0.22f), Offset(cx, cy + r * 1.46f), Offset(cx, cy + cross), 1f)
 
         // ---- reactor core: triangular coil inside a ring
         drawCircle(
-            color = color.copy(alpha = 0.10f + glow * 0.10f),
+            color = color.copy(alpha = 0.20f + glow * 0.14f),
             radius = r * 0.58f,
             center = Offset(cx, cy)
         )
@@ -280,7 +289,7 @@ private fun StatusCard(state: AgentState, logs: List<String>, color: Color) {
                     Text(
                         text = "SEEMA_JARVIS ONLINE",
                         color = HUD.TextPrimary,
-                        fontSize = 10.sp,
+                        fontSize = 14.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 2.4.sp
@@ -289,7 +298,7 @@ private fun StatusCard(state: AgentState, logs: List<String>, color: Color) {
                 Text(
                     text = state.hudLabel(),
                     color = color,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.6.sp
                 )
@@ -311,7 +320,7 @@ private fun CommandLog(logs: List<String>) {
             Text(
                 text = (if (newest) "› " else "  ") + line,
                 color = if (newest) HUD.TextPrimary else HUD.TextMuted,
-                fontSize = 10.sp,
+                fontSize = 14.sp,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

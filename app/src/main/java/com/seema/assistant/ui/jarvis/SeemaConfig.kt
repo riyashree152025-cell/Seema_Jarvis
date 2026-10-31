@@ -31,7 +31,7 @@ data class SeemaConfig(
     val deployment: String = DEPLOY_MANUAL,
     // --- Interface
     val colorProfile: String = PROFILE_RED,
-    val glowIntensity: Float = 0.70f,
+    val glowIntensity: Float = 0.85f,
     val transparency: Float = 0.60f,
     val smoothReactor: Boolean = true
 ) {

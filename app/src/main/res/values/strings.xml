@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="seema_screen_context_summary">SEEMA screen context</string>
+    <string name="seema_screen_context_description">Lets SEEMA read the text currently visible on screen so you can ask things like "what does this screen say" or "find the pay now button". Nothing leaves the phone unless you ask a question that needs the internet.</string>
+</resources>

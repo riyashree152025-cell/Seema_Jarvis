@@ -21,6 +21,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.rementia.openwakeword.lib.WakeWordEngine
+import com.seema.assistant.ui.jarvis.SeemaConfig
+import com.seema.assistant.ui.jarvis.SeemaConfigStore
 import com.rementia.openwakeword.lib.model.DetectionMode
 import com.rementia.openwakeword.lib.model.WakeWordModel
 import java.util.Locale
@@ -127,6 +129,7 @@ class SeemaVoiceService : Service() {
                     SeemaCommand.START_CONVERSATION -> launchConversation()
                     SeemaCommand.DAILY_BRIEFING -> launchConversation(initialCommand = BRIEFING_QUERY)
                     SeemaCommand.STOP -> stopConversation()
+                    SeemaCommand.RELOAD_CONFIG -> reloadConfig()
                 }
             }
         }
@@ -160,7 +163,15 @@ class SeemaVoiceService : Service() {
             return START_NOT_STICKY
         }
         acquireWakeLock()
-        if (engineInitJob == null) initEngine()
+        // The wake word can be switched off in the configuration screen. The ONNX detector costs
+        // roughly two cores continuously, so honouring that switch here is the single biggest
+        // battery saving the app has.
+        if (SeemaConfigStore(this).load().wakeWord) {
+            if (engineInitJob == null) initEngine()
+        } else {
+            wakeWordUnavailable = true
+            startListening()
+        }
         when (intent?.action) {
             // Headset button / assistant gesture started us: talk right away.
             ACTION_TALK -> launchConversation()
@@ -174,6 +185,36 @@ class SeemaVoiceService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    /**
+     * Re-reads the configuration and re-arms (or tears down) the wake word engine.
+     *
+     * Called when the configuration screen saves. Tearing the engine down is not cosmetic:
+     * the detector runs three ONNX sessions over a live AudioRecord, so leaving it alive while
+     * the user believes the wake word is off would keep burning power for nothing.
+     */
+    private fun reloadConfig() {
+        val enabled = SeemaConfigStore(this).load().wakeWord
+        if (enabled) {
+            wakeWordUnavailable = false
+            if (engine == null && engineInitJob == null) initEngine() else startListening()
+            return
+        }
+        engineInitJob?.cancel()
+        engineInitJob = null
+        val current = engine
+        engine = null
+        current?.stop()
+        wakeWordUnavailable = true
+        SeemaState.setResponse("Wake word OFF · tap TALK or type a command")
+        updateNotification("Wake word off · tap TALK to speak")
+        if (current != null) {
+            serviceScope.launch {
+                delay(ENGINE_RELEASE_DELAY_MS)
+                current.release()
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -538,9 +579,33 @@ class SeemaVoiceService : Service() {
 
         // No internet: answer basic commands locally. Also used if the agent failed because the
         // connection dropped mid-request.
-        var offline = !NetworkStatus.isOnline(this)
-        var reply = if (offline) offlineBrain.handle(command) else SeemaAgent.runAgent(command)
-        var note = if (offline) "⚠ OFFLINE" else ""
+        val config = SeemaConfigStore(this).load()
+        // An optional second brain. The Gemini free tier allows only 20 requests a day, so a Groq
+        // key is what keeps the assistant conversational once that is spent.
+        val groqReady = SeemaConfigBridge.groqKey(this).isNotBlank()
+        var offline = !NetworkStatus.isOnline(this) || config.localBrain
+        var reply = when {
+            offline -> offlineBrain.handle(command)
+            // Groq cannot call the phone's tools, so it is offered only as a conversational brain.
+            config.aiEngine == SeemaConfig.ENGINE_GROQ && groqReady -> {
+                val groq = GroqBrain.ask(this, SeemaAgent.conversationalPrompt(), command)
+                if (!groq.startsWith("ERROR:")) groq else SeemaAgent.runAgent(command)
+            }
+            else -> {
+                val gemini = SeemaAgent.runAgent(command)
+                if (gemini.startsWith("ERROR:") && groqReady) {
+                    val groq = GroqBrain.ask(this, SeemaAgent.conversationalPrompt(), command)
+                    if (!groq.startsWith("ERROR:")) groq else gemini
+                } else {
+                    gemini
+                }
+            }
+        }
+        var note = when {
+            config.localBrain -> "⚠ LOCAL BRAIN"
+            offline -> "⚠ OFFLINE"
+            else -> ""
+        }
         when {
             // Gemini's quota for this API key is used up (free tier resets daily): basics still work.
             SeemaAgent.isQuotaError(reply) -> {

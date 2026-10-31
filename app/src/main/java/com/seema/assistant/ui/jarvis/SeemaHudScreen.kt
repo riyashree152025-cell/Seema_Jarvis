@@ -43,7 +43,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.seema.assistant.AgentState
+import com.seema.assistant.SeemaCommand
+import com.seema.assistant.SeemaConfigBridge
 import com.seema.assistant.SeemaMemory
+import com.seema.assistant.SeemaState
 import com.seema.assistant.SeemaRoutines
 import java.io.File
 import java.time.LocalTime
@@ -147,7 +150,13 @@ fun SeemaHudScreen(
                     }
                     Tab.SETTINGS -> SystemSettingsScreen(
                         config = config,
-                        onSave = { configState.commit(it) },
+                        onSave = {
+                            configState.commit(it)
+                            // Push the settings that change real behaviour into the components that
+                            // own them, then tell the voice service to re-arm.
+                            SeemaConfigBridge.apply(context, it)
+                            SeemaState.send(SeemaCommand.RELOAD_CONFIG)
+                        },
                         onReset = { configState.reset() },
                         onClose = { tab = Tab.HOME },
                         modifier = Modifier.fillMaxSize()
@@ -212,7 +221,7 @@ private fun TopBar(
                     Text(
                         text = "‹ CORE",
                         color = HUD.Blood,
-                        fontSize = 9.sp,
+                        fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
                         letterSpacing = 1.4.sp,
                         modifier = Modifier
@@ -224,7 +233,7 @@ private fun TopBar(
                 Text(
                     text = "SEEMA_JARVIS",
                     color = HUD.Blood,
-                    fontSize = 12.sp,
+                    fontSize = 16.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 4.5.sp
@@ -234,14 +243,14 @@ private fun TopBar(
                 Text(
                     text = clock,
                     color = HUD.Gold,
-                    fontSize = 13.sp,
+                    fontSize = 17.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.sp
                 )
                 Text(
                     text = protocol.title + " · " + protocol.subtitle,
                     color = HUD.TextMuted,
-                    fontSize = 8.sp,
+                    fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.2.sp
                 )
@@ -261,7 +270,7 @@ private fun TopBar(
                 Text(
                     text = state.hudLabel(),
                     color = state.hudColor(),
-                    fontSize = 8.sp,
+                    fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.6.sp,
                     modifier = Modifier.padding(top = 6.dp)
@@ -278,7 +287,7 @@ private fun ProtocolChip(label: String, active: Boolean, onClick: () -> Unit) {
     Text(
         text = label,
         color = if (active) HUD.Black else HUD.BloodDim,
-        fontSize = 8.sp,
+        fontSize = 11.sp,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Medium,
         letterSpacing = 1.4.sp,
@@ -305,7 +314,7 @@ private fun TalkPill(micGranted: Boolean, onClick: () -> Unit, modifier: Modifie
         Text(
             text = if (micGranted) "TALK" else "GRANT",
             color = HUD.Blood,
-            fontSize = 8.sp,
+            fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
             letterSpacing = 1.4.sp
@@ -342,13 +351,13 @@ private fun FileRow(file: File) {
         Text(
             text = file.name,
             color = HUD.TextPrimary,
-            fontSize = 11.sp,
+            fontSize = 15.sp,
             fontFamily = FontFamily.Monospace
         )
         Text(
             text = humanSize(file.length()),
             color = HUD.TextMuted,
-            fontSize = 10.sp,
+            fontSize = 14.sp,
             fontFamily = FontFamily.Monospace
         )
     }
@@ -372,7 +381,7 @@ private fun CodingPage(config: SeemaConfig, state: AgentState, modifier: Modifie
             Text(
                 text = line,
                 color = HUD.TextMuted,
-                fontSize = 10.sp,
+                fontSize = 14.sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(vertical = 3.dp)
             )
@@ -393,7 +402,7 @@ private fun TerminalPage(
                 Text(
                     "› awaiting first command",
                     color = HUD.TextMuted,
-                    fontSize = 10.sp,
+                    fontSize = 14.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }
@@ -401,7 +410,7 @@ private fun TerminalPage(
                 Text(
                     text = "› $line",
                     color = HUD.TextPrimary,
-                    fontSize = 10.sp,
+                    fontSize = 14.sp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
@@ -418,12 +427,12 @@ private fun TerminalPage(
                 .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("›", color = HUD.Blood, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            Text("›", color = HUD.Blood, fontSize = 16.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = input,
                 onValueChange = { input = it },
-                textStyle = TextStyle(color = HUD.TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+                textStyle = TextStyle(color = HUD.TextPrimary, fontSize = 16.sp, fontFamily = FontFamily.Monospace),
                 cursorBrush = SolidColor(HUD.Blood),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -440,7 +449,7 @@ private fun TerminalPage(
         Text(
             text = "TYPE A COMMAND AND PRESS ENTER",
             color = HUD.TextMuted.copy(alpha = 0.6f),
-            fontSize = 8.sp,
+            fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             letterSpacing = 1.6.sp
         )
@@ -461,9 +470,9 @@ private fun ProfilePage(state: AgentState, serviceRunning: Boolean, modifier: Mo
         Text(
             text = "OWNER · FULL ACCESS\nLOCAL STORE ONLY · NO CLOUD SYNC",
             color = HUD.TextMuted,
-            fontSize = 10.sp,
+            fontSize = 14.sp,
             fontFamily = FontFamily.Monospace,
-            lineHeight = 16.sp
+            lineHeight = 21.sp
         )
     }
 }
@@ -484,9 +493,9 @@ private fun PageScaffold(
         Text(
             text = subtitle,
             color = HUD.TextMuted,
-            fontSize = 8.sp,
+            fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
-            letterSpacing = 1.8.sp
+            letterSpacing = 1.11.sp
         )
         Spacer(Modifier.height(16.dp))
         content()
@@ -500,11 +509,11 @@ private fun StatusRow(label: String, value: String, ok: Boolean) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, color = HUD.TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.2.sp)
+        Text(label, color = HUD.TextMuted, fontSize = 14.sp, fontFamily = FontFamily.Monospace, letterSpacing = 1.2.sp)
         Text(
             value,
             color = if (ok) HUD.Online else HUD.BloodDim,
-            fontSize = 10.sp,
+            fontSize = 14.sp,
             fontFamily = FontFamily.Monospace
         )
     }
@@ -512,7 +521,7 @@ private fun StatusRow(label: String, value: String, ok: Boolean) {
 
 @Composable
 private fun EmptyLine(text: String) {
-    Text(text, color = HUD.TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+    Text(text, color = HUD.TextMuted, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
 }
 
 // ---------------------------------------------------------------------------------- utilities

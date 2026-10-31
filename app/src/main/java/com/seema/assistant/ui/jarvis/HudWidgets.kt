@@ -37,7 +37,7 @@ fun GlassPanel(
     content: @Composable BoxScope.() -> Unit
 ) {
     val sheen = Brush.verticalGradient(
-        colors = listOf(HUD.Blood.copy(alpha = 0.07f), androidx.compose.ui.graphics.Color.Transparent)
+        colors = listOf(HUD.SheenTop, androidx.compose.ui.graphics.Color.Transparent)
     )
     Box(
         modifier = modifier
@@ -57,7 +57,7 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
         Text(
             text = text,
             color = HUD.BloodDim,
-            fontSize = 9.sp,
+            fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
             letterSpacing = 3.sp

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Screen Context service declaration.
+
+  canRetrieveWindowContent is what allows the service to read on-screen text; the event types
+  are limited to window state and content changes so the service is not woken for every scroll
+  micro-event. Nothing is sent anywhere by this service: it only keeps the current screen text
+  in memory so a voice command can ask about it.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/seema_screen_context_description"
+    android:notificationTimeout="300"
+    android:summary="@string/seema_screen_context_summary" />

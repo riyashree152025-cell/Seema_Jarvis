@@ -58,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.seema.assistant.AiSettings
+import com.seema.assistant.SeemaAccessibilityService
+import com.seema.assistant.SeemaConfigBridge
 import java.util.Locale
 
 /**
@@ -84,6 +86,7 @@ fun SystemSettingsScreen(
 ) {
     // Local staging copy: every control below edits this, nothing else.
     var draft by remember(config) { mutableStateOf(config) }
+    val context = LocalContext.current
 
     // External reset (or any other source of truth change) refreshes what the controls show.
     LaunchedEffect(config) { draft = config }
@@ -93,7 +96,7 @@ fun SystemSettingsScreen(
     val backdrop = remember {
         Brush.verticalGradient(
             colors = listOf(
-                HUD.Blood.copy(alpha = 0.10f),
+                HUD.Blood.copy(alpha = 0.22f),
                 Color.Transparent,
                 Color.Transparent
             )
@@ -137,6 +140,8 @@ fun SystemSettingsScreen(
                     onCheckedChange = { draft = draft.copy(localBrain = it) }
                 )
                 Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
+                GroqKeyRow()
                 ApiKeyRow()
             }
 
@@ -168,8 +173,14 @@ fun SystemSettingsScreen(
                 ToggleRow(
                     label = "Deep Accessibility Access",
                     checked = draft.accessibilityAccess,
-                    onCheckedChange = { draft = draft.copy(accessibilityAccess = it) }
+                    onCheckedChange = {
+                        draft = draft.copy(accessibilityAccess = it)
+                        if (it) SeemaAccessibilityService.openSettings(context)
+                    }
                 )
+                ActionRow(label = "Open screen-access settings", action = "OPEN") {
+                    SeemaAccessibilityService.openSettings(context)
+                }
                 ToggleRow(
                     label = "Screen Context Awareness",
                     checked = draft.screenContext,
@@ -295,7 +306,7 @@ private fun HeaderRow(onClose: () -> Unit) {
 
         Text(
             text = "SYSTEM CONFIGURATION",
-            fontSize = 13.sp,
+            fontSize = 17.sp,
             fontFamily = HUD_FONT,
             fontWeight = FontWeight.Bold,
             letterSpacing = 2.sp,
@@ -307,7 +318,7 @@ private fun HeaderRow(onClose: () -> Unit) {
 
         Text(
             text = "v1.0",
-            fontSize = 9.sp,
+            fontSize = 12.sp,
             fontFamily = HUD_FONT,
             letterSpacing = 1.sp,
             color = HUD.TextMuted
@@ -334,7 +345,7 @@ private fun HudGroup(
     ) {
         Text(
             text = title,
-            fontSize = 9.sp,
+            fontSize = 12.sp,
             fontFamily = HUD_FONT,
             fontWeight = FontWeight.Bold,
             letterSpacing = 3.sp,
@@ -387,7 +398,7 @@ private fun ToggleRow(
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            fontSize = 12.sp,
+            fontSize = 16.sp,
             fontFamily = HUD_FONT,
             color = HUD.TextPrimary,
             maxLines = 2,
@@ -396,7 +407,7 @@ private fun ToggleRow(
         Text(
             text = if (checked) "ON" else "OFF",
             modifier = Modifier.padding(end = 10.dp),
-            fontSize = 10.sp,
+            fontSize = 14.sp,
             fontFamily = HUD_FONT,
             color = HUD.TextMuted,
             textAlign = TextAlign.End
@@ -454,7 +465,7 @@ private fun DropdownRow(
     Column(Modifier.fillMaxWidth()) {
         Text(
             text = label,
-            fontSize = 12.sp,
+            fontSize = 16.sp,
             fontFamily = HUD_FONT,
             color = HUD.TextPrimary,
             maxLines = 1
@@ -484,7 +495,7 @@ private fun DropdownRow(
                 Text(
                     text = selected,
                     modifier = Modifier.weight(1f),
-                    fontSize = 12.sp,
+                    fontSize = 16.sp,
                     fontFamily = HUD_FONT,
                     color = HUD.TextPrimary,
                     maxLines = 1,
@@ -492,7 +503,7 @@ private fun DropdownRow(
                 )
                 Text(
                     text = "\u25BE",
-                    fontSize = 11.sp,
+                    fontSize = 15.sp,
                     fontFamily = HUD_FONT,
                     color = HUD.Blood
                 )
@@ -512,7 +523,7 @@ private fun DropdownRow(
                         text = {
                             Text(
                                 text = option,
-                                fontSize = 12.sp,
+                                fontSize = 16.sp,
                                 fontFamily = HUD_FONT,
                                 color = if (isSelected) HUD.Blood else HUD.TextPrimary,
                                 maxLines = 1
@@ -550,14 +561,14 @@ private fun SliderRow(
             Text(
                 text = label,
                 modifier = Modifier.weight(1f),
-                fontSize = 12.sp,
+                fontSize = 16.sp,
                 fontFamily = HUD_FONT,
                 color = HUD.TextPrimary,
                 maxLines = 1
             )
             Text(
                 text = shown,
-                fontSize = 10.sp,
+                fontSize = 14.sp,
                 fontFamily = HUD_FONT,
                 color = HUD.TextMuted,
                 textAlign = TextAlign.End
@@ -613,7 +624,7 @@ private fun HudButton(
     ) {
         Text(
             text = text,
-            fontSize = 9.sp,
+            fontSize = 12.sp,
             fontFamily = HUD_FONT,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp,
@@ -651,7 +662,7 @@ private fun ApiKeyRow() {
         Text(
             text = "GEMINI API KEY",
             color = HUD.TextMuted,
-            fontSize = 10.sp,
+            fontSize = 14.sp,
             fontFamily = HUD_FONT,
             letterSpacing = 1.4.sp
         )
@@ -672,7 +683,7 @@ private fun ApiKeyRow() {
                 Text(
                     text = if (stored.isBlank()) "NOT CONFIGURED" else "••••••••••••••••",
                     color = if (stored.isBlank()) HUD.TextMuted.copy(alpha = 0.6f) else HUD.TextPrimary,
-                    fontSize = 10.sp,
+                    fontSize = 14.sp,
                     fontFamily = HUD_FONT,
                     letterSpacing = 2.sp,
                     modifier = Modifier.weight(1f)
@@ -680,7 +691,7 @@ private fun ApiKeyRow() {
                 Text(
                     text = if (saved) "SAVED" else "CHANGE",
                     color = if (saved) HUD.Online else HUD.Blood,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontFamily = HUD_FONT,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 1.4.sp,
@@ -706,14 +717,14 @@ private fun ApiKeyRow() {
                     Text(
                         text = "paste new key from aistudio.google.com",
                         color = HUD.TextMuted.copy(alpha = 0.6f),
-                        fontSize = 10.sp,
+                        fontSize = 14.sp,
                         fontFamily = HUD_FONT
                     )
                 }
                 BasicTextField(
                     value = draftKey,
                     onValueChange = { draftKey = it },
-                    textStyle = TextStyle(color = HUD.TextPrimary, fontSize = 10.sp, fontFamily = HUD_FONT),
+                    textStyle = TextStyle(color = HUD.TextPrimary, fontSize = 14.sp, fontFamily = HUD_FONT),
                     cursorBrush = SolidColor(HUD.Blood),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -724,7 +735,7 @@ private fun ApiKeyRow() {
                 Text(
                     text = "CANCEL",
                     color = HUD.TextMuted,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontFamily = HUD_FONT,
                     letterSpacing = 1.4.sp,
                     modifier = Modifier
@@ -739,7 +750,7 @@ private fun ApiKeyRow() {
                 Text(
                     text = "SAVE KEY",
                     color = HUD.Blood,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontFamily = HUD_FONT,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 1.4.sp,
@@ -759,5 +770,146 @@ private fun ApiKeyRow() {
                 )
             }
         }
+    }
+}
+/**
+ * Optional second brain key.
+ *
+ * Groq's API is OpenAI-compatible and costs a fraction of the Gemini paid tier, and its free
+ * allowance is per-minute rather than per-day, so it keeps the assistant conversational after
+ * the Gemini free tier's 20 requests are gone. The key lives in the AI preference file next to
+ * the Gemini key and is never rendered on screen.
+ */
+@Composable
+private fun GroqKeyRow() {
+    val context = LocalContext.current
+    var stored by remember { mutableStateOf(SeemaConfigBridge.groqKey(context)) }
+    var editing by remember { mutableStateOf(false) }
+    var draftKey by remember { mutableStateOf("") }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            text = "GROQ API KEY (OPTIONAL FALLBACK)",
+            color = HUD.TextMuted,
+            fontSize = 11.sp,
+            fontFamily = HUD_FONT,
+            letterSpacing = 1.4.sp
+        )
+        Spacer(Modifier.height(6.dp))
+        if (!editing) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(3.dp))
+                    .border(1.dp, HUD.Hairline, RoundedCornerShape(3.dp))
+                    .padding(horizontal = 10.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (stored.isBlank()) "NOT CONFIGURED" else "••••••••••••••••",
+                    color = if (stored.isBlank()) HUD.TextMuted.copy(alpha = 0.7f) else HUD.TextPrimary,
+                    fontSize = 11.sp,
+                    fontFamily = HUD_FONT,
+                    letterSpacing = 2.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "CHANGE",
+                    color = HUD.Blood,
+                    fontSize = 11.sp,
+                    fontFamily = HUD_FONT,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 1.4.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .clickable { editing = true; draftKey = "" }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(3.dp))
+                    .border(1.dp, HUD.Blood, RoundedCornerShape(3.dp))
+                    .padding(horizontal = 10.dp, vertical = 10.dp)
+            ) {
+                if (draftKey.isBlank()) {
+                    Text(
+                        text = "paste key from console.groq.com",
+                        color = HUD.TextMuted.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        fontFamily = HUD_FONT
+                    )
+                }
+                BasicTextField(
+                    value = draftKey,
+                    onValueChange = { draftKey = it },
+                    textStyle = TextStyle(color = HUD.TextPrimary, fontSize = 11.sp, fontFamily = HUD_FONT),
+                    cursorBrush = SolidColor(HUD.Blood),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Text(
+                    text = "CANCEL",
+                    color = HUD.TextMuted,
+                    fontSize = 11.sp,
+                    fontFamily = HUD_FONT,
+                    letterSpacing = 1.4.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .clickable { editing = false; draftKey = "" }
+                        .padding(8.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "SAVE KEY",
+                    color = HUD.Blood,
+                    fontSize = 11.sp,
+                    fontFamily = HUD_FONT,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 1.4.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .border(1.dp, HUD.Blood, RoundedCornerShape(3.dp))
+                        .clickable {
+                            if (draftKey.isNotBlank()) {
+                                SeemaConfigBridge.setGroqKey(context, draftKey)
+                                stored = draftKey.trim()
+                            }
+                            draftKey = ""
+                            editing = false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                )
+            }
+        }
+    }
+}
+
+/** A full-width action row: used for jumps into system settings the app cannot change itself. */
+@Composable
+private fun ActionRow(label: String, action: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(3.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = HUD.TextPrimary, fontSize = 13.sp, fontFamily = HUD_FONT)
+        Text(
+            action,
+            color = HUD.Blood,
+            fontSize = 11.sp,
+            fontFamily = HUD_FONT,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 1.4.sp
+        )
     }
 }
