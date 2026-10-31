@@ -27,8 +27,6 @@ object SeemaAgent {
     private const val TAG = "SeemaAgent"
     private const val APP_NAME = "Seema"
     private const val USER_ID = "owner"
-    /** From local.properties (SEEMA_GEMINI_MODEL); defaults to gemini-flash-latest. */
-    private val MODEL_NAME = BuildConfig.SEEMA_GEMINI_MODEL
 
     private val SYSTEM_PROMPT = """
         You are SEEMA, a personal AI assistant living on your owner's Android phone, inspired by JARVIS.
@@ -117,14 +115,13 @@ object SeemaAgent {
 
     @Volatile private var appContext: Context? = null
 
-    private val agent by lazy {
-        val context = checkNotNull(appContext) { "SeemaAgent.init(context) was not called" }
+    private fun buildAgent(context: Context, apiKey: String, model: String): LlmAgent {
         val clockTools = SeemaClockTools(context)
         val weatherTools = SeemaWeatherTools(context)
-        LlmAgent(
+        return LlmAgent(
             name = "Seema",
             description = "Personal JARVIS-style voice assistant.",
-            model = Gemini(name = MODEL_NAME, apiKey = BuildConfig.GEMINI_API_KEY),
+            model = Gemini(name = model, apiKey = apiKey),
             // Rebuilt every turn, so new memories and the current time are always included.
             instruction = Instruction { _ -> Content(parts = listOf(Part(text = buildInstruction()))) },
             tools = SeemaTools(context).generatedTools() +
@@ -144,9 +141,22 @@ object SeemaAgent {
         )
     }
 
-    // InMemoryRunner creates the session on first use, so conversation memory
-    // lasts until resetConversation() or the process dies.
-    private val runner by lazy { InMemoryRunner(agent = agent, appName = APP_NAME) }
+    /** "model|key" the current runner was built with; a change in Settings rebuilds it. */
+    @Volatile private var runnerConfig: String? = null
+    @Volatile private var cachedRunner: InMemoryRunner? = null
+
+    // InMemoryRunner creates the session on first use, so conversation memory lasts until
+    // resetConversation(), a key/model change, or the process dies.
+    private fun runner(context: Context, apiKey: String, model: String): InMemoryRunner {
+        val config = "$model|$apiKey"
+        cachedRunner?.takeIf { runnerConfig == config }?.let { return it }
+        return InMemoryRunner(agent = buildAgent(context, apiKey, model), appName = APP_NAME).also {
+            cachedRunner = it
+            runnerConfig = config
+            sessionId = newSessionId()
+            Log.i(TAG, "Agent ready with model $model")
+        }
+    }
 
     private val mutex = Mutex()
 
@@ -164,13 +174,16 @@ object SeemaAgent {
 
     /** Sends [userQuery] to SEEMA and returns the final spoken-style reply. Never throws (except cancellation). */
     suspend fun runAgent(userQuery: String): String {
-        if (BuildConfig.GEMINI_API_KEY.isBlank()) {
-            return "ERROR: GEMINI_API_KEY is missing in local.properties"
+        val context = appContext ?: return "ERROR: SeemaAgent.init(context) was not called"
+        val settings = AiSettings(context)
+        val apiKey = settings.effectiveApiKey
+        if (apiKey.isBlank()) {
+            return "ERROR: No Gemini API key. Add it in ⚙ Settings → AI, or GEMINI_API_KEY in local.properties."
         }
         return mutex.withLock {
             withContext(Dispatchers.IO) {
                 try {
-                    collectReply(userQuery)
+                    collectReply(runner(context, apiKey, settings.effectiveModel), userQuery)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -192,7 +205,7 @@ object SeemaAgent {
         sessionId = newSessionId()
     }
 
-    private suspend fun collectReply(userQuery: String): String {
+    private suspend fun collectReply(runner: InMemoryRunner, userQuery: String): String {
         val reply = StringBuilder()
         var lastError: String? = null
 

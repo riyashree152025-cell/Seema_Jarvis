@@ -38,6 +38,15 @@ object SeemaState {
     /** Live microphone level from 0 (silence) to 1 (loud) while SEEMA is hearing a command. */
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
 
+    private val _wakeScore = MutableStateFlow(0f)
+
+    /** Latest wake word score (shown live in Settings to tune sensitivity). */
+    val wakeScore: StateFlow<Float> = _wakeScore.asStateFlow()
+
+    fun setWakeScore(score: Float) {
+        _wakeScore.value = score
+    }
+
     private val _serviceRunning = MutableStateFlow(false)
 
     /** True while SeemaVoiceService is alive in this process. */

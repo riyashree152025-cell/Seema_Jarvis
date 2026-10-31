@@ -22,7 +22,6 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.rementia.openwakeword.lib.WakeWordEngine
 import com.rementia.openwakeword.lib.model.DetectionMode
-import com.rementia.openwakeword.lib.model.WakeWordDetection
 import com.rementia.openwakeword.lib.model.WakeWordModel
 import java.util.Locale
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -65,6 +64,8 @@ class SeemaVoiceService : Service() {
     private lateinit var callAnnouncer: CallAnnouncer
     private lateinit var powerTriggers: PowerTriggerMonitor
     private lateinit var offlineBrain: OfflineBrain
+    /** Read live, so changes saved in Settings apply without restarting the service. */
+    private val voiceSettings by lazy { VoiceSettings(this) }
     private lateinit var audioManager: AudioManager
 
     /** Held for a whole conversation so music pauses while SEEMA listens, then resumes. */
@@ -90,6 +91,8 @@ class SeemaVoiceService : Service() {
         RoutineScheduler.ensureScheduled(this)
         audioManager = getSystemService(AudioManager::class.java)
         speechRecognizer = SeemaSpeechRecognizer(this)
+        // If the app was killed mid-listen, the beep-muted streams could still be muted.
+        speechRecognizer.restoreAudio(force = true)
         textToSpeech = SeemaTextToSpeech(this)
         offlineBrain = OfflineBrain(this)
         // Stay quiet about callers while a conversation is using the mic and speaker.
@@ -171,7 +174,9 @@ class SeemaVoiceService : Service() {
                     WakeWordModel(
                         name = WAKE_WORD_NAME,
                         modelPath = modelPath,
-                        threshold = WAKE_WORD_THRESHOLD
+                        // The library's own detection is effectively off; SEEMA applies the
+                        // threshold from Settings to the live scores below, so it can change anytime.
+                        threshold = LIBRARY_THRESHOLD_OFF
                     )
                 ),
                 detectionMode = DetectionMode.SINGLE_BEST,
@@ -182,7 +187,10 @@ class SeemaVoiceService : Service() {
             Log.i(TAG, "Wake word engine ready with model '$modelPath'")
 
             launch {
-                newEngine.detections.collect { detection -> dispatchWakeWord(detection) }
+                newEngine.scores.collect { score ->
+                    SeemaState.setWakeScore(score.score)
+                    if (score.score >= voiceSettings.wakeThreshold) dispatchWakeWord(score.score)
+                }
             }
             // A conversation may already hold the mic (started by the headset button); it re-arms when done.
             if (wakeWordJob?.isActive != true) startListening()
@@ -266,7 +274,7 @@ class SeemaVoiceService : Service() {
 
     // ------------------------------------------------------------ voice loop
 
-    private fun dispatchWakeWord(detection: WakeWordDetection) {
+    private fun dispatchWakeWord(score: Float) {
         // Ignore new triggers while the previous one is still being handled.
         if (wakeWordJob?.isActive == true) return
         // The engine keeps ~1.3 s of audio features across restarts; ignore re-triggers from them.
@@ -274,7 +282,7 @@ class SeemaVoiceService : Service() {
             Log.d(TAG, "Ignoring stale detection right after re-arming")
             return
         }
-        Log.i(TAG, "🎤 SEEMA DETECTED! (score=${"%.3f".format(detection.score)})")
+        Log.i(TAG, "🎤 WAKE WORD DETECTED! (score=${"%.3f".format(score)}, threshold=${voiceSettings.wakeThreshold})")
         launchConversation()
     }
 
@@ -343,7 +351,8 @@ class SeemaVoiceService : Service() {
         val result = try {
             withTimeoutOrNull(COMMAND_TIMEOUT_MS) {
                 speechRecognizer.listenOnce(
-                    languageTag = SPEECH_LANGUAGE,
+                    languageTag = voiceSettings.speechLanguage,
+                    muteBeep = voiceSettings.muteRecognitionBeep,
                     speechStartTimeoutMs = if (followUp) FOLLOW_UP_WINDOW_MS else null,
                     offline = !NetworkStatus.isOnline(this@SeemaVoiceService) ||
                         VoiceSettings(this@SeemaVoiceService).preferOfflineRecognition,
@@ -418,6 +427,7 @@ class SeemaVoiceService : Service() {
     }
 
     private suspend fun speak(text: String) {
+        speechRecognizer.restoreAudio()
         SeemaState.update(AgentState.SPEAKING)
         updateNotification("Speaking…")
         textToSpeech.speak(text)
@@ -534,7 +544,8 @@ class SeemaVoiceService : Service() {
         const val NOTIFICATION_ID = 1001
 
         private const val WAKE_WORD_NAME = "Seema"
-        private const val WAKE_WORD_THRESHOLD = 0.5f
+        /** Above any real score: the library's own detections never fire. */
+        private const val LIBRARY_THRESHOLD_OFF = 2f
         private const val DETECTION_COOLDOWN_MS = 2000L
         private const val RESTART_DELAY_MS = 3000L
         private const val ENGINE_RELEASE_DELAY_MS = 500L
@@ -552,8 +563,6 @@ class SeemaVoiceService : Service() {
         /** Safety cap on wake-word-free turns in one conversation. */
         private const val MAX_CONVERSATION_TURNS = 10
 
-        /** "en-IN" understands Indian English and romanised Hinglish; use "hi-IN" for Hindi. */
-        private const val SPEECH_LANGUAGE = "en-IN"
 
         private const val NO_SPEECH_REPLY = "I didn't catch that."
         private const val STT_ERROR_REPLY = "Sorry, I couldn't hear you properly."

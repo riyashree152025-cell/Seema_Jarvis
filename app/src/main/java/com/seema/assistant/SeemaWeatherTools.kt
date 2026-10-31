@@ -53,7 +53,7 @@ class SeemaWeatherTools(context: Context) {
             } else {
                 // From background work (daily briefing) location may be denied; fall back to the home city.
                 runCatching { currentPlace() }.getOrNull()
-                    ?: BuildConfig.SEEMA_HOME_CITY.takeIf { it.isNotBlank() }?.let { geocode(it) }
+                    ?: AiSettings(appContext).effectiveHomeCity.takeIf { it.isNotBlank() }?.let { geocode(it) }
                     ?: return failure(
                         "Location unknown. Ask the user which city, or to allow Location for SEEMA."
                     )
@@ -75,7 +75,7 @@ class SeemaWeatherTools(context: Context) {
     fun rainAlert(withinHours: Int = 2): String? = try {
         // Background location may be denied; fall back to the home city.
         val place = runCatching { currentPlace() }.getOrNull()
-            ?: BuildConfig.SEEMA_HOME_CITY.takeIf { it.isNotBlank() }?.let { geocode(it) }
+            ?: AiSettings(appContext).effectiveHomeCity.takeIf { it.isNotBlank() }?.let { geocode(it) }
         if (place == null) {
             null
         } else {

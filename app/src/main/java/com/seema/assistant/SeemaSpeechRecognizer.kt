@@ -3,6 +3,7 @@ package com.seema.assistant
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -28,6 +29,13 @@ class SeemaSpeechRecognizer(context: Context) {
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val beepSilencer = BeepSilencer(appContext.getSystemService(AudioManager::class.java))
+
+    /**
+     * Unmutes the beep-silenced streams right away (before SEEMA speaks). With [force], also
+     * after a restart, in case the app was killed while they were muted.
+     */
+    fun restoreAudio(force: Boolean = false) = beepSilencer.unmute(force)
 
     fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(appContext) || hasOnDeviceRecognizer()
 
@@ -46,6 +54,7 @@ class SeemaSpeechRecognizer(context: Context) {
         languageTag: String,
         speechStartTimeoutMs: Long? = null,
         offline: Boolean = false,
+        muteBeep: Boolean = false,
         onLevel: (Float) -> Unit = {},
         onPartial: (String) -> Unit
     ): SpeechResult = withContext(Dispatchers.Main) {
@@ -58,9 +67,14 @@ class SeemaSpeechRecognizer(context: Context) {
             }
             val destroyed = AtomicBoolean(false)
             lateinit var speechStartTimeout: Runnable
+            if (muteBeep) beepSilencer.mute()
 
             fun destroy() {
-                if (destroyed.compareAndSet(false, true)) recognizer.destroy()
+                if (destroyed.compareAndSet(false, true)) {
+                    recognizer.destroy()
+                    // Let the "stop" beep play into the muted streams before restoring them.
+                    if (muteBeep) mainHandler.postDelayed({ beepSilencer.unmute() }, BEEP_UNMUTE_DELAY_MS)
+                }
             }
 
             fun finish(result: SpeechResult) {
@@ -160,9 +174,46 @@ class SeemaSpeechRecognizer(context: Context) {
 
     private companion object {
         const val TAG = "SeemaSTT"
+        const val BEEP_UNMUTE_DELAY_MS = 600L
 
         // Typical onRmsChanged range on Google's recognizer.
         const val RMS_SILENCE_DB = -2f
         const val RMS_LOUD_DB = 10f
+    }
+}
+
+/**
+ * Google's recognizer plays a short tone on start and stop. Muting the streams it can use for
+ * that tone while listening keeps SEEMA silent; the microphone is not affected.
+ */
+private class BeepSilencer(private val audioManager: AudioManager) {
+
+    private var muted = false
+
+    @Synchronized
+    fun mute() {
+        if (muted) return
+        muted = true
+        STREAMS.forEach { adjust(it, AudioManager.ADJUST_MUTE) }
+    }
+
+    /** Unmuting a stream that is not muted does nothing, so [force] is always safe. */
+    @Synchronized
+    fun unmute(force: Boolean = false) {
+        if (!muted && !force) return
+        muted = false
+        STREAMS.forEach { adjust(it, AudioManager.ADJUST_UNMUTE) }
+    }
+
+    private fun adjust(stream: Int, direction: Int) {
+        try {
+            audioManager.adjustStreamVolume(stream, direction, 0)
+        } catch (e: SecurityException) {
+            // Changing some streams is blocked while Do Not Disturb is on; skip those.
+        }
+    }
+
+    private companion object {
+        val STREAMS = intArrayOf(AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM)
     }
 }
