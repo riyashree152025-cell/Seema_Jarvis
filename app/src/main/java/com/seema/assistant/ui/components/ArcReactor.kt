@@ -27,8 +27,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.seema.assistant.AgentState
 import com.seema.assistant.ui.theme.DeepSpace
-import com.seema.assistant.ui.theme.HearingWhite
+import com.seema.assistant.ui.theme.AlertRed
 import com.seema.assistant.ui.theme.JarvisCyan
+import com.seema.assistant.ui.theme.SleepCyan
+import com.seema.assistant.ui.theme.SpeakingBlue
 import com.seema.assistant.ui.theme.SpeakingGreen
 import com.seema.assistant.ui.theme.TextSecondary
 import com.seema.assistant.ui.theme.ThinkingAmber
@@ -41,28 +43,34 @@ private const val DEG_TO_RAD = (PI / 180).toFloat()
 
 fun AgentState.reactorColor(): Color = when (this) {
     AgentState.IDLE -> TextSecondary
+    AgentState.SLEEPING -> SleepCyan
     AgentState.LISTENING -> JarvisCyan
-    AgentState.HEARING -> HearingWhite
+    AgentState.HEARING -> SpeakingGreen
     AgentState.THINKING -> ThinkingAmber
-    AgentState.SPEAKING -> SpeakingGreen
+    AgentState.SPEAKING -> SpeakingBlue
+    AgentState.ERROR -> AlertRed
 }
 
 /** Ring rotation in degrees per second. */
 private fun AgentState.rotationSpeed(): Float = when (this) {
     AgentState.IDLE -> 15f
+    AgentState.SLEEPING -> 8f
     AgentState.LISTENING -> 45f
     AgentState.HEARING -> 30f
     AgentState.THINKING -> 220f
     AgentState.SPEAKING -> 90f
+    AgentState.ERROR -> 0f
 }
 
 /** Core pulse in radians per second. */
 private fun AgentState.pulseSpeed(): Float = when (this) {
     AgentState.IDLE -> 1.2f
+    AgentState.SLEEPING -> 0.8f
     AgentState.LISTENING -> 2.5f
-    AgentState.HEARING -> 5f
+    AgentState.HEARING -> 8f
     AgentState.THINKING -> 7f
     AgentState.SPEAKING -> 10f
+    AgentState.ERROR -> 0f
 }
 
 /**

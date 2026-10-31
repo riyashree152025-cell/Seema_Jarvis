@@ -322,7 +322,8 @@ fun SeemaScreen(
 
             if (micGranted) {
                 ControlRow(
-                    busy = displayState != AgentState.LISTENING,
+                    busy = displayState == AgentState.HEARING || displayState == AgentState.THINKING ||
+                        displayState == AgentState.SPEAKING,
                     onTalk = onTalk,
                     onBriefing = onBriefing,
                     routines = routines,

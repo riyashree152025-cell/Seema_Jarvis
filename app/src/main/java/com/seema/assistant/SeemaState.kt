@@ -10,10 +10,16 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class AgentState(val label: String) {
     IDLE("STANDBY"),
+
+    /** No voice input for a while: only the wake word engine runs. */
+    SLEEPING("SLEEPING · SAY HEY JARVIS"),
     LISTENING("ONLINE & LISTENING"),
     HEARING("YES? I'M LISTENING"),
     THINKING("PROCESSING..."),
-    SPEAKING("RESPONDING")
+    SPEAKING("RESPONDING"),
+
+    /** The last request failed (network, Gemini or speech); shown briefly, then back to listening. */
+    ERROR("ERROR · TRY AGAIN")
 }
 
 /** Requests from the UI and the Quick Settings tile to SeemaVoiceService. */

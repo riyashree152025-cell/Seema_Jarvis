@@ -24,6 +24,7 @@ import com.rementia.openwakeword.lib.WakeWordEngine
 import com.rementia.openwakeword.lib.model.DetectionMode
 import com.rementia.openwakeword.lib.model.WakeWordModel
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,9 @@ class SeemaVoiceService : Service() {
     private var engineInitJob: Job? = null
     private var restartJob: Job? = null
     @Volatile private var wakeWordJob: Job? = null
+    private var inactivityJob: Job? = null
+    /** True after [INACTIVITY_TIMEOUT_MS] without voice input; only the wake word engine runs. */
+    @Volatile private var sleeping = false
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var speechRecognizer: SeemaSpeechRecognizer
@@ -202,17 +206,24 @@ class SeemaVoiceService : Service() {
         if (current == null) {
             // No wake word model: stay usable through TALK, the tile, the widget and the headset button.
             if (wakeWordUnavailable) {
-                SeemaState.update(AgentState.LISTENING)
+                SeemaState.update(if (sleeping) AgentState.SLEEPING else AgentState.LISTENING)
                 updateNotification("Wake word off · tap TALK to speak")
+                if (!sleeping) resetInactivityTimer()
             }
             return
         }
         try {
             current.start()
             listeningSince = SystemClock.elapsedRealtime()
-            SeemaState.update(AgentState.LISTENING)
-            updateNotification("Listening for \"$WAKE_WORD_NAME\"")
-            Log.i(TAG, "Listening for wake word")
+            if (sleeping) {
+                SeemaState.update(AgentState.SLEEPING)
+                updateNotification("Sleeping · say \"$WAKE_WORD_NAME\" to wake me")
+            } else {
+                SeemaState.update(AgentState.LISTENING)
+                updateNotification("Listening for \"$WAKE_WORD_NAME\"")
+                resetInactivityTimer()
+            }
+            Log.i(TAG, "Listening for wake word${if (sleeping) " (sleep mode)" else ""}")
         } catch (e: Exception) {
             Log.e(TAG, "Could not start listening", e)
             scheduleRestart()
@@ -274,6 +285,45 @@ class SeemaVoiceService : Service() {
 
     // ------------------------------------------------------------ voice loop
 
+    /** Restarts the 2-minute countdown to sleep mode. Called on every voice interaction. */
+    @Synchronized
+    private fun resetInactivityTimer() {
+        inactivityJob?.cancel()
+        inactivityJob = serviceScope.launch {
+            delay(INACTIVITY_TIMEOUT_MS)
+            goToSleep()
+        }
+    }
+
+    /**
+     * No voice input for [INACTIVITY_TIMEOUT_MS]: stop any SpeechRecognizer still waiting for
+     * speech and show SLEEPING. The wake word engine keeps running, so "Hey Jarvis" wakes SEEMA.
+     */
+    private fun goToSleep() {
+        val conversation = wakeWordJob
+        if (conversation?.isActive == true) {
+            val state = SeemaState.state.value
+            // Busy thinking or speaking is not inactivity: check again later.
+            if (state != AgentState.HEARING && state != AgentState.ERROR) {
+                resetInactivityTimer()
+                return
+            }
+            sleeping = true
+            Log.i(TAG, "😴 Inactive — stopping speech recognition, sleep mode")
+            conversation.cancel() // its finally block re-arms the wake word in SLEEPING state
+            return
+        }
+        sleeping = true
+        Log.i(TAG, "😴 Inactive for ${INACTIVITY_TIMEOUT_MS / 1000}s — sleep mode")
+        if (engine != null || wakeWordUnavailable) {
+            SeemaState.update(AgentState.SLEEPING)
+            updateNotification(
+                if (wakeWordUnavailable) "Sleeping · tap TALK to speak"
+                else "Sleeping · say \"$WAKE_WORD_NAME\" to wake me"
+            )
+        }
+    }
+
     private fun dispatchWakeWord(score: Float) {
         // Ignore new triggers while the previous one is still being handled.
         if (wakeWordJob?.isActive == true) return
@@ -282,7 +332,11 @@ class SeemaVoiceService : Service() {
             Log.d(TAG, "Ignoring stale detection right after re-arming")
             return
         }
-        Log.i(TAG, "🎤 WAKE WORD DETECTED! (score=${"%.3f".format(score)}, threshold=${voiceSettings.wakeThreshold})")
+        Log.i(
+            TAG,
+            "🎤 WAKE WORD DETECTED!${if (sleeping) " Waking up." else ""} " +
+                "(score=${"%.3f".format(score)}, threshold=${voiceSettings.wakeThreshold})"
+        )
         launchConversation()
     }
 
@@ -293,11 +347,20 @@ class SeemaVoiceService : Service() {
     @Synchronized
     private fun launchConversation(initialCommand: String? = null) {
         if (wakeWordJob?.isActive == true) return
+        // Any way of starting a conversation wakes SEEMA up and restarts the inactivity timer.
+        sleeping = false
+        resetInactivityTimer()
         wakeWordJob = serviceScope.launch {
             audioManager.requestAudioFocus(conversationFocus)
-            releaseMicrophone()
             try {
+                releaseMicrophone()
                 runConversation(initialCommand)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Never leave the UI stuck on PROCESSING/LISTENING after an unexpected failure.
+                Log.e(TAG, "Conversation failed", e)
+                showError("ERROR: ${e.message ?: e::class.java.simpleName}")
             } finally {
                 // Back to always-on wake word listening, whatever happened above.
                 startListening()
@@ -367,6 +430,7 @@ class SeemaVoiceService : Service() {
 
         return when (result) {
             is SpeechResult.Text -> {
+                resetInactivityTimer()
                 Log.i(TAG, "👤 Command${if (followUp) " (follow-up)" else ""}: ${result.text}")
                 result.text
             }
@@ -387,6 +451,7 @@ class SeemaVoiceService : Service() {
                 } else {
                     SeemaState.setResponse("ERROR: Speech recognition — ${result.message}")
                     speak(STT_ERROR_REPLY)
+                    holdErrorState()
                 }
                 null
             }
@@ -419,11 +484,29 @@ class SeemaVoiceService : Service() {
             }
         }
         Log.i(TAG, "🤖 SEEMA${if (offline) " (offline)" else ""}: $reply")
-        SeemaState.setResponse("YOU: $command\n\nSEEMA$note: $reply")
-
         val failed = reply.startsWith("ERROR:")
-        speak(if (failed) AGENT_ERROR_REPLY else reply)
-        return !failed
+        if (failed) {
+            SeemaState.setResponse("YOU: $command\n\n⚠ $NETWORK_ERROR_TEXT\n${reply.removePrefix("ERROR:").trim()}")
+            speak(AGENT_ERROR_REPLY)
+            holdErrorState()
+            return false
+        }
+        SeemaState.setResponse("YOU: $command\n\nSEEMA$note: $reply")
+        speak(reply)
+        return true
+    }
+
+    /** Shows [message] in the red ERROR state for a moment (used when nothing will be spoken). */
+    private suspend fun showError(message: String) {
+        SeemaState.setResponse(message)
+        holdErrorState()
+    }
+
+    /** Red, static reactor for [ERROR_HOLD_MS]; the conversation's finally block then re-arms listening. */
+    private suspend fun holdErrorState() {
+        SeemaState.update(AgentState.ERROR)
+        updateNotification(NETWORK_ERROR_TEXT)
+        delay(ERROR_HOLD_MS)
     }
 
     private suspend fun speak(text: String) {
@@ -562,11 +645,16 @@ class SeemaVoiceService : Service() {
         private const val FOLLOW_UP_GAP_MS = 250L
         /** Safety cap on wake-word-free turns in one conversation. */
         private const val MAX_CONVERSATION_TURNS = 10
+        /** No voice input for this long puts SEEMA to sleep (wake word only). */
+        private const val INACTIVITY_TIMEOUT_MS = 2 * 60_000L
+        /** How long the red ERROR state stays on screen before listening again. */
+        private const val ERROR_HOLD_MS = 3_000L
+        private const val NETWORK_ERROR_TEXT = "Network Error. Please try again."
 
 
         private const val NO_SPEECH_REPLY = "I didn't catch that."
         private const val STT_ERROR_REPLY = "Sorry, I couldn't hear you properly."
-        private const val AGENT_ERROR_REPLY = "Sorry, something went wrong. The details are on screen."
+        private const val AGENT_ERROR_REPLY = "Network error. Please try again."
         private const val GOODBYE_REPLY = "Anytime. I'll be right here."
         private const val BRIEFING_QUERY = "Good morning! Give me my daily briefing."
 

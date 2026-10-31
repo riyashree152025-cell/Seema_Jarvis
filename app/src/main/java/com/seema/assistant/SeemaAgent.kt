@@ -1,6 +1,7 @@
 package com.seema.assistant
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.google.adk.kt.agents.Instruction
 import com.google.adk.kt.agents.LlmAgent
@@ -15,11 +16,15 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /** The "brain": a Google ADK LlmAgent backed by Gemini. Call [init] before [runAgent]. */
 object SeemaAgent {
@@ -172,7 +177,12 @@ object SeemaAgent {
         SeemaTriggers.init(context)
     }
 
-    /** Sends [userQuery] to SEEMA and returns the final spoken-style reply. Never throws (except cancellation). */
+    /**
+     * Sends [userQuery] to SEEMA and returns the final spoken-style reply, or a line starting
+     * with "ERROR:". Never throws (except cancellation) and never hangs: each attempt is capped
+     * at [ATTEMPT_TIMEOUT_MS], and 503/429/timeouts are retried [MAX_RETRIES] times with
+     * exponential backoff (2 s, 4 s, 8 s) within [TOTAL_DEADLINE_MS].
+     */
     suspend fun runAgent(userQuery: String): String {
         val context = appContext ?: return "ERROR: SeemaAgent.init(context) was not called"
         val settings = AiSettings(context)
@@ -182,17 +192,59 @@ object SeemaAgent {
         }
         return mutex.withLock {
             withContext(Dispatchers.IO) {
-                try {
-                    collectReply(runner(context, apiKey, settings.effectiveModel), userQuery)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.e(TAG, "Agent run failed", e)
-                    "ERROR: ${e.message ?: e::class.java.simpleName}"
+                val started = SystemClock.elapsedRealtime()
+                var backoffMs = INITIAL_BACKOFF_MS
+                var attempt = 0
+                while (true) {
+                    val result = runOnce(runner(context, apiKey, settings.effectiveModel), userQuery)
+                    // Never repeat a turn whose tools already ran (a call or SMS must not happen twice).
+                    val retryable = result.failed && !result.toolsCalled && isRetryable(result.text)
+                    val elapsed = SystemClock.elapsedRealtime() - started
+                    if (!retryable || attempt >= MAX_RETRIES || elapsed + backoffMs > TOTAL_DEADLINE_MS) {
+                        return@withContext result.text
+                    }
+                    attempt++
+                    Log.w(TAG, "Retry $attempt/$MAX_RETRIES in ${backoffMs}ms after: ${result.text}")
+                    delay(backoffMs)
+                    backoffMs *= 2
                 }
+                @Suppress("UNREACHABLE_CODE")
+                "ERROR: retry loop exited"
             }
         }
     }
+
+    private class Attempt(val text: String, val toolsCalled: Boolean) {
+        val failed: Boolean get() = text.startsWith("ERROR:")
+    }
+
+    private suspend fun runOnce(runner: InMemoryRunner, userQuery: String): Attempt {
+        val tools = AtomicBoolean(false)
+        return try {
+            withTimeout(ATTEMPT_TIMEOUT_MS) {
+                Attempt(collectReply(runner, userQuery, tools), tools.get())
+            }
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "Gemini did not answer within ${ATTEMPT_TIMEOUT_MS}ms")
+            Attempt("ERROR: TIMEOUT — Gemini did not answer in ${ATTEMPT_TIMEOUT_MS / 1000}s", tools.get())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Agent run failed", e)
+            Attempt("ERROR: ${e.message ?: e::class.java.simpleName}", tools.get())
+        }
+    }
+
+    private fun isRetryable(error: String): Boolean = RETRY_MARKERS.any { error.contains(it, ignoreCase = true) }
+
+    private val RETRY_MARKERS = listOf(
+        "503", "UNAVAILABLE", "overloaded", "429", "RESOURCE_EXHAUSTED", "rate limit",
+        "TIMEOUT", "timed out", "500", "INTERNAL", "Unable to resolve host", "connection reset"
+    )
+    private const val MAX_RETRIES = 3
+    private const val INITIAL_BACKOFF_MS = 2_000L
+    private const val ATTEMPT_TIMEOUT_MS = 25_000L
+    private const val TOTAL_DEADLINE_MS = 60_000L
 
     /** True when [reply] is Gemini refusing because the API key's quota (free tier: per day) is used up. */
     fun isQuotaError(reply: String): Boolean =
@@ -205,7 +257,7 @@ object SeemaAgent {
         sessionId = newSessionId()
     }
 
-    private suspend fun collectReply(runner: InMemoryRunner, userQuery: String): String {
+    private suspend fun collectReply(runner: InMemoryRunner, userQuery: String, toolsCalled: AtomicBoolean): String {
         val reply = StringBuilder()
         var lastError: String? = null
 
@@ -220,6 +272,7 @@ object SeemaAgent {
                 Log.w(TAG, "Agent error ${event.errorCode}: $it")
             }
             event.functionCalls().forEach { call ->
+                toolsCalled.set(true)
                 Log.d(TAG, "🛠 Tool call: ${call.name}(${call.args})")
             }
             event.functionResponses().forEach { response ->
