@@ -148,6 +148,7 @@ class SeemaVoiceService : Service() {
             SeemaState.routineRequests.collect { name -> launchConversation(initialCommand = "Run my $name routine.") }
         }
         SeemaState.setServiceRunning(true)
+        startWatchdog()
 
         serviceScope.launch {
             // Routines are part of the widget too (shortcut buttons), so redraw when they change.
@@ -217,6 +218,47 @@ class SeemaVoiceService : Service() {
         }
     }
 
+    /**
+     * Swiping the app out of recents must not kill the always-on listener.
+     *
+     * This is a foreground service with a persistent notification, so it is allowed to keep
+     * running; returning normally (rather than calling stopSelf) is what makes "Hey Jarvis" keep
+     * working with the app closed. The engine is rebuilt if it died while the task was gone.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.i(TAG, "Task removed; keeping the voice service alive")
+        if (engine == null && engineInitJob?.isActive != true && SeemaConfigStore(this).load().wakeWord) {
+            engineInitJob = null
+            initEngine()
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
+    /**
+     * Watchdog.
+     *
+     * A microphone foreground service on an aggressive OEM build can lose its AudioRecord without
+     * reporting an error. This checks every 30 seconds that the engine is either alive or
+     * deliberately switched off, and rebuilds it when it is neither. It also clears a stalled
+     * work-stream flag so the code stream can never be left running by a tool that died.
+     */
+    private fun startWatchdog() {
+        serviceScope.launch {
+            while (true) {
+                delay(WATCHDOG_INTERVAL_MS)
+                if (SeemaWorkStream.active.value && SeemaWorkStream.stalled()) {
+                    Log.w(TAG, "Clearing a stalled work stream")
+                    SeemaWorkStream.reset()
+                }
+                val wanted = SeemaConfigStore(this@SeemaVoiceService).load().wakeWord
+                if (wanted && engine == null && engineInitJob?.isActive != true && !wakeWordUnavailable) {
+                    Log.w(TAG, "Wake word engine is not running; rebuilding it")
+                    initEngine()
+                }
+            }
+        }
+    }
+
     override fun onDestroy() {
         // The user (or the system) stopped SEEMA: do not bring it back after the next reboot.
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -226,6 +268,7 @@ class SeemaVoiceService : Service() {
         val current = engine
         engine = null
         current?.stop()
+        SeemaWorkStream.reset()
         callAnnouncer.unregister()
         powerTriggers.unregister()
         serviceScope.cancel()
@@ -583,6 +626,12 @@ class SeemaVoiceService : Service() {
         // An optional second brain. The Gemini free tier allows only 20 requests a day, so a Groq
         // key is what keeps the assistant conversational once that is spent.
         val groqReady = SeemaConfigBridge.groqKey(this).isNotBlank()
+        // Lets the agent shorten its own timeout: a dead primary should cost seconds, not 25.
+        SeemaAgent.fallbackAvailable = groqReady
+        // The HUD's code stream stays hidden unless real work is running, so the flag is raised
+        // only for turns that actually generate code, scrape a page or write a file.
+        val autonomous = isAutonomousWork(command)
+        if (autonomous) SeemaWorkStream.begin("AUTONOMOUS TASK")
         var offline = !NetworkStatus.isOnline(this) || config.localBrain
         var reply = when {
             offline -> offlineBrain.handle(command)
@@ -601,6 +650,7 @@ class SeemaVoiceService : Service() {
                 }
             }
         }
+        if (autonomous) SeemaWorkStream.end()
         var note = when {
             config.localBrain -> "⚠ LOCAL BRAIN"
             offline -> "⚠ OFFLINE"
@@ -648,6 +698,10 @@ class SeemaVoiceService : Service() {
         updateNotification(NETWORK_ERROR_TEXT)
         delay(ERROR_HOLD_MS)
     }
+
+    /** True when this command asks for code, a page, a file or a scrape. */
+    private fun isAutonomousWork(command: String): Boolean =
+        AUTONOMOUS_HINTS.any { command.contains(it, ignoreCase = true) }
 
     private suspend fun speak(text: String) {
         speechRecognizer.restoreAudio()
@@ -790,6 +844,15 @@ class SeemaVoiceService : Service() {
         private const val LIBRARY_THRESHOLD_OFF = 2f
         private const val DETECTION_COOLDOWN_MS = 2000L
         private const val RESTART_DELAY_MS = 3000L
+        private const val WATCHDOG_INTERVAL_MS = 30_000L
+
+        /** Words that mean the user is asking for machine work the HUD can visualise. */
+        private val AUTONOMOUS_HINTS = listOf(
+            "code", "script", "html", "css", "kotlin", "python", "json", "sql",
+            "file", "folder", "save", "write", "create", "generate", "build",
+            "scrape", "crawl", "download", "website", "web page", "deploy",
+            "banao", "bana do", "likho", "likh do", "file banao", "code likho"
+        )
         private const val ENGINE_RELEASE_DELAY_MS = 500L
 
         /** Time for the engine's AudioRecord loop to exit and release the mic. */

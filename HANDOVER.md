@@ -132,3 +132,36 @@ raised to 0.85.
 Autonomous code generation and website deployment are configuration only (no generator or
 deploy backend exists). Automation Scripts and Gesture Activation are stored but not acted
 on. The Groq path has no tool access by design, so device actions stay on Gemini.
+
+---
+
+## UPDATE — phase 3: layout, stream gating, service resilience, Groq status
+
+### Interface
+- The reactor and the MARK-II globe are clamped against the canvas: the collar and brackets reach
+  ~1.5x the core radius, so on a narrow or short screen the whole instrument scales down instead
+  of being cropped, and the core is offset inside its box so the caption never sits on it.
+- Palette lifted again (base 0x241016, pure white primary text, 24% white glass, ~90% edge light).
+
+### Code stream
+- Strictly hidden by default. It renders only while `SeemaWorkStream` reports an active coding,
+  web-scraping or file-generation task, is reference counted across tools, and has a 3-minute
+  stall guard so a dead tool cannot leave it running.
+
+### Foreground service
+- `onTaskRemoved` keeps the listener alive when the app is swiped away, and a 30-second watchdog
+  rebuilds the wake word engine if an OEM build silently kills its AudioRecord.
+- Offline recognition: the on-device recogniser is constructed defensively, a busy recogniser is
+  treated as no-speech rather than an error, `startListening` failures are caught, and any offline
+  failure is retried once online so voice never dead-ends.
+
+### Groq
+- Live status indicator on the configuration page: a real request to the Groq chat endpoint on
+  save, green when it answers, red when the key is missing or rejected.
+- **The shipped model was dead.** `llama-3.3-70b-versatile` returns 404 from Groq now. The brain
+  now uses a verified chain (`qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`),
+  advances to the next model on a retired model or an empty answer, and the token budget was
+  raised to 1024 because reasoning models otherwise spend the whole budget thinking and return
+  no visible text.
+- When a fallback key exists the Gemini timeout drops from 25 s to 8 s with a single retry, so a
+  dead primary costs seconds instead of half a minute. Measured fallback: ~3 s to a spoken answer.

@@ -132,6 +132,20 @@ object SeemaAgent {
     @Volatile private var appContext: Context? = null
 
     /**
+     * True when a second brain is configured and can answer without tools.
+     *
+     * With a fallback in place there is no point waiting a full 25 seconds for Gemini before
+     * trying it: the timeout and the retry budget are both cut so a dead primary costs a few
+     * seconds instead of half a minute. Without a fallback the long timeout is kept, because
+     * then waiting is strictly better than failing.
+     */
+    @Volatile var fallbackAvailable: Boolean = false
+
+    private fun attemptTimeoutMs(): Long = if (fallbackAvailable) FAST_ATTEMPT_TIMEOUT_MS else ATTEMPT_TIMEOUT_MS
+
+    private fun maxRetries(): Int = if (fallbackAvailable) FAST_MAX_RETRIES else MAX_RETRIES
+
+    /**
      * A GenAI client tuned for a voice assistant.
      *
      * Two settings matter:
@@ -163,7 +177,8 @@ object SeemaAgent {
         val config = SeemaConfigStore(context).load()
         val optionalTools =
             (if (config.webSearch) SeemaWebTools(context).generatedTools() else emptyList()) +
-                (if (config.screenContext) SeemaScreenTools(context).generatedTools() else emptyList())
+                (if (config.screenContext) SeemaScreenTools(context).generatedTools() else emptyList()) +
+                (if (config.codeGeneration) SeemaCodeTools(context).generatedTools() else emptyList())
         return LlmAgent(
             name = "Seema",
             description = "Personal JARVIS-style voice assistant.",
@@ -198,7 +213,7 @@ object SeemaAgent {
         val hud = SeemaConfigStore(context).load()
         // Tool availability is part of the agent's identity: toggling web search or screen context
         // must rebuild it, otherwise the model keeps answering with yesterday's tool list.
-        val config = "$model|$apiKey|${hud.webSearch}|${hud.screenContext}"
+        val config = "$model|$apiKey|${hud.webSearch}|${hud.screenContext}|${hud.codeGeneration}"
         cachedRunner?.takeIf { runnerConfig == config }?.let { return it }
         return InMemoryRunner(agent = buildAgent(context, apiKey, model), appName = APP_NAME).also {
             cachedRunner = it
@@ -245,7 +260,7 @@ object SeemaAgent {
                     // Never repeat a turn whose tools already ran (a call or SMS must not happen twice).
                     val retryable = result.failed && !result.toolsCalled && isRetryable(result.text)
                     val elapsed = SystemClock.elapsedRealtime() - started
-                    if (!retryable || attempt >= MAX_RETRIES || elapsed + backoffMs > TOTAL_DEADLINE_MS) {
+                    if (!retryable || attempt >= maxRetries() || elapsed + backoffMs > TOTAL_DEADLINE_MS) {
                         return@withContext result.text
                     }
                     attempt++
@@ -266,12 +281,12 @@ object SeemaAgent {
     private suspend fun runOnce(runner: InMemoryRunner, userQuery: String): Attempt {
         val tools = AtomicBoolean(false)
         return try {
-            withTimeout(ATTEMPT_TIMEOUT_MS) {
+            withTimeout(attemptTimeoutMs()) {
                 Attempt(collectReply(runner, userQuery, tools), tools.get())
             }
         } catch (e: TimeoutCancellationException) {
             Log.w(TAG, "Gemini did not answer within ${ATTEMPT_TIMEOUT_MS}ms")
-            Attempt("ERROR: TIMEOUT — Gemini did not answer in ${ATTEMPT_TIMEOUT_MS / 1000}s", tools.get())
+            Attempt("ERROR: TIMEOUT — Gemini did not answer in ${attemptTimeoutMs() / 1000}s", tools.get())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -289,6 +304,8 @@ object SeemaAgent {
         "TIMEOUT", "timed out", "500", "INTERNAL", "Unable to resolve host", "connection reset"
     )
     private const val MAX_RETRIES = 3
+    private const val FAST_MAX_RETRIES = 1
+    private const val FAST_ATTEMPT_TIMEOUT_MS = 8_000L
     private const val INITIAL_BACKOFF_MS = 2_000L
     private const val ATTEMPT_TIMEOUT_MS = 25_000L
     private const val TOTAL_DEADLINE_MS = 60_000L

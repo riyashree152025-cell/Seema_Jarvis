@@ -1,5 +1,7 @@
 package com.seema.assistant.ui.jarvis
 
+import android.content.Context
+
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -37,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,8 +62,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.seema.assistant.AiSettings
 import com.seema.assistant.SeemaAccessibilityService
+import com.seema.assistant.GroqBrain
 import com.seema.assistant.SeemaConfigBridge
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * Everything the user can reconfigure, laid out as a scrolling stack of instrument panes.
@@ -87,6 +92,9 @@ fun SystemSettingsScreen(
     // Local staging copy: every control below edits this, nothing else.
     var draft by remember(config) { mutableStateOf(config) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Live health of the optional Groq key; re-checked every time the configuration is saved.
+    var groqStatus by remember { mutableStateOf(GroqStatus.UNKNOWN) }
 
     // External reset (or any other source of truth change) refreshes what the controls show.
     LaunchedEffect(config) { draft = config }
@@ -141,7 +149,7 @@ fun SystemSettingsScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Spacer(Modifier.height(12.dp))
-                GroqKeyRow()
+                GroqKeyRow(status = groqStatus)
                 ApiKeyRow()
             }
 
@@ -259,7 +267,11 @@ fun SystemSettingsScreen(
                 HudButton(
                     text = "SAVE CONFIGURATION",
                     filled = true,
-                    onClick = { onSave(draft) },
+                    onClick = {
+                        onSave(draft)
+                        groqStatus = GroqStatus.CHECKING
+                        scope.launch { groqStatus = checkGroq(context) }
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -652,6 +664,9 @@ private val HUD_FONT = FontFamily.Monospace
 @Composable
 private fun ApiKeyRow() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Live health of the optional Groq key; re-checked every time the configuration is saved.
+    var groqStatus by remember { mutableStateOf(GroqStatus.UNKNOWN) }
     val ai = remember { AiSettings(context) }
     var stored by remember { mutableStateOf(ai.apiKey) }
     var editing by remember { mutableStateOf(false) }
@@ -781,13 +796,15 @@ private fun ApiKeyRow() {
  * the Gemini key and is never rendered on screen.
  */
 @Composable
-private fun GroqKeyRow() {
+private fun GroqKeyRow(status: GroqStatus) {
     val context = LocalContext.current
     var stored by remember { mutableStateOf(SeemaConfigBridge.groqKey(context)) }
     var editing by remember { mutableStateOf(false) }
     var draftKey by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxWidth()) {
+        GroqStatusRow(status)
+        Spacer(Modifier.height(12.dp))
         Text(
             text = "GROQ API KEY (OPTIONAL FALLBACK)",
             color = HUD.TextMuted,
@@ -912,4 +929,70 @@ private fun ActionRow(label: String, action: String, onClick: () -> Unit) {
             letterSpacing = 1.4.sp
         )
     }
+}
+/** Health of the optional Groq key, as shown on the configuration page. */
+private enum class GroqStatus { UNKNOWN, CHECKING, CONNECTED, FAILED }
+
+/**
+ * Colour-coded indicator for the Groq key.
+ *
+ * The point is to answer "is my fallback brain actually working" before the user needs it,
+ * instead of discovering it mid-conversation. Green means a round trip to the Groq API
+ * succeeded; red means the key is missing, rejected, or the network refused it.
+ */
+@Composable
+private fun GroqStatusRow(status: GroqStatus) {
+    val color = when (status) {
+        GroqStatus.UNKNOWN -> HUD.TextMuted
+        GroqStatus.CHECKING -> HUD.Warn
+        GroqStatus.CONNECTED -> HUD.Online
+        GroqStatus.FAILED -> HUD.Danger
+    }
+    val label = when (status) {
+        GroqStatus.UNKNOWN -> "NOT CHECKED - SAVE TO TEST"
+        GroqStatus.CHECKING -> "CHECKING CONNECTION..."
+        GroqStatus.CONNECTED -> "CONNECTED - KEY VALID"
+        GroqStatus.FAILED -> "DISCONNECTED - INVALID OR MISSING KEY"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(3.dp))
+            .background(color.copy(alpha = 0.14f))
+            .border(1.dp, color.copy(alpha = 0.7f), RoundedCornerShape(3.dp))
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(11.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            text = "GROQ API STATUS: $label",
+            color = color,
+            fontSize = 12.sp,
+            fontFamily = HUD_FONT,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.8.sp
+        )
+    }
+}
+
+/**
+ * Round-trips a one-word prompt through the Groq chat endpoint.
+ *
+ * Deliberately a real request rather than a key-format check: a key can be well-formed and still
+ * rejected, rate limited or pointed at a dead network, and only an actual call proves otherwise.
+ */
+private suspend fun checkGroq(context: Context): GroqStatus {
+    if (SeemaConfigBridge.groqKey(context).isBlank()) return GroqStatus.FAILED
+    val reply = GroqBrain.ask(
+        context = context,
+        systemPrompt = "You are a connectivity check. Reply with the single word OK.",
+        userMessage = "ping"
+    )
+    return if (reply.startsWith("ERROR:")) GroqStatus.FAILED else GroqStatus.CONNECTED
 }

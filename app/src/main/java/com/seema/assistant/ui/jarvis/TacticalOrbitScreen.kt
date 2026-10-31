@@ -91,7 +91,9 @@ private fun GlobeCanvas(spin: Float, color: Color, modifier: Modifier = Modifier
         val u = 1.dp.toPx()
         val cx = size.width / 2f
         val cy = size.height / 2f
-        val radius = size.minDimension * 0.34f
+        // Same clamp as the reactor: the horizon ring and brackets reach ~1.24x the globe radius.
+        val radius = (size.minDimension * 0.34f)
+            .coerceAtMost(((size.minDimension * 0.5f) - 24.dp.toPx()) / 1.26f)
         val tilt = 0.52f
         val rad = spin * (PI.toFloat() / 180f)
         val cosA = cos(rad)

@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +52,7 @@ import com.seema.assistant.SeemaCommand
 import com.seema.assistant.SeemaConfigBridge
 import com.seema.assistant.SeemaMemory
 import com.seema.assistant.SeemaState
+import com.seema.assistant.SeemaWorkStream
 import com.seema.assistant.SeemaRoutines
 import java.io.File
 import java.time.LocalTime
@@ -133,12 +135,17 @@ fun SeemaHudScreen(
                 }
         )
 
-        // Layer 1: the live code stream. It speeds up while the agent is thinking.
-        CodeStreamBackground(
-            fast = state == AgentState.THINKING,
-            transparency = config.transparency,
-            modifier = Modifier.fillMaxSize()
-        )
+        // Layer 1: the live code stream. Strictly hidden unless a coding, scraping or file
+        // generation task is genuinely running: a permanent stream is decoration, a stream that
+        // appears while code is being written is feedback.
+        val workActive by SeemaWorkStream.active.collectAsState()
+        if (workActive) {
+            CodeStreamBackground(
+                fast = true,
+                transparency = config.transparency,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
             TopBar(

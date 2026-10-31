@@ -40,6 +40,7 @@ import com.seema.assistant.AgentState
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.sin
 
 /**
@@ -81,7 +82,7 @@ fun ReactorHud(
                 glow = glow,
                 fast = fast,
                 smooth = config.smoothReactor,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize().padding(bottom = 64.dp)
             )
             Column(
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -140,7 +141,11 @@ private fun ReactorCore(
         val cx = size.width / 2f
         val cy = size.height / 2f
         val unit = size.minDimension * 0.5f
-        val r = unit * 0.44f * (if (smooth) pulse else 1f) * (1f + level * 0.09f)
+        // Clamp against the canvas: the collar and its ticks reach ~1.52x the core radius, so on
+        // a narrow or short screen the reactor scales down instead of being cropped.
+        val safeRadius = (min(size.width, size.height) * 0.5f) - 24.dp.toPx()
+        val r = (unit * 0.44f * (if (smooth) pulse else 1f) * (1f + level * 0.09f))
+            .coerceAtMost(safeRadius / 1.52f)
 
         // ---- outer halo: layered flat discs, no per-frame shader
         for (i in 6 downTo 1) {

@@ -33,7 +33,16 @@ object GroqBrain {
     private const val TAG = "GroqBrain"
 
     /** Groq's general-purpose Llama model: strong enough for speech, fast enough for a reply. */
-    const val DEFAULT_MODEL = "llama-3.3-70b-versatile"
+    /** Primary Groq model. Verified against the live /models endpoint of the user's key. */
+    const val DEFAULT_MODEL = "qwen/qwen3.8-27b"
+
+    /**
+     * Model fallback chain, tried in order.
+     *
+     * Groq retires models without notice: llama-3.3-70b-versatile returns 404 today, which is
+     * exactly the failure this list exists to absorb. The first model that answers wins.
+     */
+    val MODEL_CHAIN = listOf("qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b")
 
     private const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -46,7 +55,7 @@ object GroqBrain {
     /** An error line must stay readable when it is spoken or shown in a toast. */
     private const val MAX_ERROR_CHARS = 160
 
-    private const val MAX_TOKENS = 300
+    private const val MAX_TOKENS = 1024
     private const val TEMPERATURE = 0.6
 
     /** The SharedPreferences file that also backs [AiSettings]. */
@@ -116,11 +125,14 @@ object GroqBrain {
             return@withContext "ERROR: No Groq API key. Add one in the app settings."
         }
 
+        // Model fallback: a retired model degrades to the next entry instead of killing the
+        // fallback brain entirely.
+        for ((index, model) in MODEL_CHAIN.withIndex()) {
         try {
             val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
             try {
                 val body = JSONObject()
-                    .put("model", DEFAULT_MODEL)
+                    .put("model", model)
                     .put("messages", messages(systemPrompt, userMessage, history))
                     .put("temperature", TEMPERATURE)
                     .put("max_tokens", MAX_TOKENS)
@@ -142,6 +154,7 @@ object GroqBrain {
                     val error = "ERROR: ${shortMessage(code, errorBody, connection.responseMessage)}"
                     lastError = error
                     Log.w(TAG, error)
+                    if (modelGone(code, error) && index < MODEL_CHAIN.lastIndex) continue
                     return@withContext error
                 }
 
@@ -154,8 +167,11 @@ object GroqBrain {
                     .orEmpty()
                     .trim()
                 if (reply.isEmpty()) {
+                    // A reasoning model can spend the whole budget thinking and return no
+                    // visible text; that is worth retrying on the next model, not a failure.
                     lastError = "Groq returned an empty reply"
                     Log.w(TAG, "Groq returned no message content")
+                    if (index < MODEL_CHAIN.lastIndex) continue
                     return@withContext "ERROR: Groq returned an empty reply"
                 }
 
@@ -169,9 +185,17 @@ object GroqBrain {
             val message = e.message ?: e.javaClass.simpleName
             lastError = message
             Log.e(TAG, "Groq request failed", e)
-            "ERROR: $message"
+            if (index < MODEL_CHAIN.lastIndex) continue
+            return@withContext "ERROR: $message"
         }
+        }
+        "ERROR: Groq is not answering right now."
     }
+
+    /** True when the failure is a retired model rather than a key or quota problem. */
+    private fun modelGone(code: Int, error: String): Boolean =
+        code == 404 || error.contains("does not exist", ignoreCase = true) ||
+            error.contains("no longer", ignoreCase = true)
 
     /** System prompt, then the earlier conversation, then the current user turn. */
     private fun messages(

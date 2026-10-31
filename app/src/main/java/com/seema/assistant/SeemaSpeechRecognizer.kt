@@ -57,11 +57,39 @@ class SeemaSpeechRecognizer(context: Context) {
         muteBeep: Boolean = false,
         onLevel: (Float) -> Unit = {},
         onPartial: (String) -> Unit
+    ): SpeechResult {
+        val first = listenAttempt(languageTag, speechStartTimeoutMs, offline, muteBeep, onLevel, onPartial)
+        // Offline recognition is fragile on real phones: without the on-device language pack the
+        // engine errors out immediately, and some devices reject EXTRA_PREFER_OFFLINE with
+        // ERROR_CLIENT. Retrying once online turns a dead end into a slower but working command,
+        // which is the difference between voice not working and voice being slightly slow.
+        if (offline && first is SpeechResult.Error) {
+            Log.i(TAG, "Offline recognition failed (${first.message}); retrying online")
+            return listenAttempt(languageTag, speechStartTimeoutMs, false, muteBeep, onLevel, onPartial)
+        }
+        return first
+    }
+
+    /** One recognition attempt with an explicit offline flag. */
+    private suspend fun listenAttempt(
+        languageTag: String,
+        speechStartTimeoutMs: Long? = null,
+        offline: Boolean = false,
+        muteBeep: Boolean = false,
+        onLevel: (Float) -> Unit = {},
+        onPartial: (String) -> Unit
     ): SpeechResult = withContext(Dispatchers.Main) {
         suspendCancellableCoroutine { continuation ->
             // Offline: the on-device recognizer when available, else the normal one told to prefer offline.
             val recognizer = if (offline && hasOnDeviceRecognizer()) {
-                SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext)
+                try {
+                    SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext)
+                } catch (e: Exception) {
+                    // No usable on-device model despite the API reporting one (common on OEM
+                    // builds without the language pack). Fall back instead of failing the turn.
+                    Log.w(TAG, "On-device recognizer unavailable, using the standard one", e)
+                    SpeechRecognizer.createSpeechRecognizer(appContext)
+                }
             } else {
                 SpeechRecognizer.createSpeechRecognizer(appContext)
             }
@@ -114,7 +142,10 @@ class SeemaSpeechRecognizer(context: Context) {
                     finish(
                         when (error) {
                             SpeechRecognizer.ERROR_NO_MATCH,
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> SpeechResult.NoSpeech
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
+                            // Transient: the previous recognizer has not released the mic yet.
+                            // Treating it as no-speech lets the loop simply try again.
+                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> SpeechResult.NoSpeech
                             else -> SpeechResult.Error(describe(error))
                         }
                     )
@@ -136,7 +167,12 @@ class SeemaSpeechRecognizer(context: Context) {
                 }
             }
 
-            recognizer.startListening(buildIntent(languageTag, offline))
+            try {
+                recognizer.startListening(buildIntent(languageTag, offline))
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not start recognition", e)
+                finish(SpeechResult.Error("Speech recognition could not start"))
+            }
         }
     }
 
