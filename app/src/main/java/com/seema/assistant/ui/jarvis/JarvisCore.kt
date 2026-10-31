@@ -14,12 +14,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import com.seema.assistant.AgentState
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -35,7 +36,7 @@ private class Node(val x: Float, val y: Float, val z: Float)
  * wake word engine.
  */
 private val CORE_NODES: List<Node> = buildList {
-    val count = 120
+    val count = 96
     val golden = (PI * (3.0 - sqrt(5.0))).toFloat()
     for (i in 0 until count) {
         val y = 1f - (i / (count - 1f)) * 2f
@@ -48,9 +49,12 @@ private val CORE_NODES: List<Node> = buildList {
 /**
  * The core: a rotating constellation, three tilted orbital rings and an instrument collar.
  *
- * It is not a progress spinner.  The rotation speed, colour, breath rate and ring behaviour
- * all encode the agent state, and the audio level physically deforms the constellation while
- * the user speaks, so the screen reacts in the same frame as the voice.
+ * This is the whole point of the screen, so it is sized to dominate it — roughly two thirds
+ * of the short edge — rather than sitting in the middle like a notification badge.
+ *
+ * No shader gradients are used. A layered halo built from plain circles costs a fraction of
+ * a per-frame radial gradient, which matters because this canvas redraws sixty times a second
+ * for as long as the app is open.
  */
 @Composable
 fun JarvisCore(
@@ -80,10 +84,10 @@ fun JarvisCore(
         label = "spin"
     )
 
-    // Breathing scale: a steady 0.92-1.08 swell, the "alive but idle" cue.
+    // Breathing scale: a steady swell, the "alive but idle" cue.
     val breath by transition.animateFloat(
-        initialValue = 0.93f,
-        targetValue = 1.07f,
+        initialValue = 0.95f,
+        targetValue = 1.05f,
         animationSpec = infiniteRepeatable(
             animation = tween(2_600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -112,74 +116,72 @@ fun JarvisCore(
         val cx = size.width / 2f
         val cy = size.height / 2f
         val base = size.minDimension * 0.5f
-        val radius = base * 0.36f * breath * (1f + level * 0.10f)
+        // 0.56 puts the constellation at ~56% of the short edge; the collar then reaches ~75%.
+        val radius = base * 0.56f * breath * (1f + level * 0.10f)
 
-        // ---- ambient glow: the light the core throws onto the glass
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    color.copy(alpha = 0.20f + level * 0.18f),
-                    color.copy(alpha = 0.05f),
-                    androidx.compose.ui.graphics.Color.Transparent
-                ),
-                center = Offset(cx, cy),
-                radius = radius * 2.9f
-            ),
-            radius = radius * 2.9f,
-            center = Offset(cx, cy)
-        )
+        // ---- ambient halo: four cheap concentric circles instead of one gradient shader
+        val haloAlpha = 0.030f + level * 0.035f
+        for (i in 5 downTo 1) {
+            drawCircle(
+                color = color.copy(alpha = haloAlpha),
+                radius = radius * (1f + i * 0.46f),
+                center = Offset(cx, cy)
+            )
+        }
 
         // ---- speaking shock fronts
         if (state == AgentState.SPEAKING) {
             val p = pulse
             drawCircle(
-                color = color.copy(alpha = (1f - p) * 0.35f),
-                radius = radius * (1.05f + p * 0.85f),
+                color = color.copy(alpha = (1f - p) * 0.40f),
+                radius = radius * (1.02f + p * 0.75f),
                 center = Offset(cx, cy),
-                style = Stroke(width = 1.2f * unit)
-            )
-        }
-
-        // ---- instrument collar: 72 ticks, every sixth one long
-        val collarRadius = radius * 1.34f
-        for (i in 0 until 72) {
-            val a = (i * 5f - 90f) * (PI.toFloat() / 180f)
-            val long = i % 6 == 0
-            val inner = collarRadius + if (long) 0f else 0.9f * unit
-            val outer = collarRadius + if (long) 4.6f * unit else 2.2f * unit
-            drawLine(
-                color = color.copy(alpha = if (long) 0.55f else 0.16f),
-                start = Offset(cx + cos(a) * inner, cy + sin(a) * inner),
-                end = Offset(cx + cos(a) * outer, cy + sin(a) * outer),
-                strokeWidth = if (long) 1.4f * unit else 0.8f * unit
-            )
-        }
-
-        // ---- radar sweep on the collar
-        val sweepAngle = sweep * 360f
-        rotate(degrees = sweepAngle, pivot = Offset(cx, cy)) {
-            drawArc(
-                color = color.copy(alpha = 0.30f),
-                startAngle = 0f,
-                sweepAngle = 46f,
-                useCenter = false,
-                topLeft = Offset(cx - collarRadius, cy - collarRadius),
-                size = Size(collarRadius * 2f, collarRadius * 2f),
                 style = Stroke(width = 1.4f * unit)
             )
         }
 
+        // ---- instrument collar: 60 ticks, every fifth one long
+        val collarRadius = radius * 1.26f
+        for (i in 0 until 60) {
+            val a = (i * 6f - 90f) * (PI.toFloat() / 180f)
+            val long = i % 5 == 0
+            val inner = collarRadius + if (long) 0f else 1.2f * unit
+            val outer = collarRadius + if (long) 7.5f * unit else 3.5f * unit
+            drawLine(
+                color = color.copy(alpha = if (long) 0.65f else 0.20f),
+                start = Offset(cx + cos(a) * inner, cy + sin(a) * inner),
+                end = Offset(cx + cos(a) * outer, cy + sin(a) * outer),
+                strokeWidth = if (long) 1.6f * unit else 0.9f * unit
+            )
+        }
+
+        // ---- radar sweep on the collar
+        rotate(degrees = sweep * 360f, pivot = Offset(cx, cy)) {
+            drawArc(
+                color = color.copy(alpha = 0.38f),
+                startAngle = 0f,
+                sweepAngle = 48f,
+                useCenter = false,
+                topLeft = Offset(cx - collarRadius, cy - collarRadius),
+                size = Size(collarRadius * 2f, collarRadius * 2f),
+                style = Stroke(width = 1.8f * unit)
+            )
+        }
+
         // ---- three tilted orbital rings
-        val ringRadii = floatArrayOf(1.16f, 1.00f, 0.82f)
+        val ringRadii = floatArrayOf(1.12f, 0.94f, 0.76f)
         val ringTilts = floatArrayOf(-24f, 38f, 12f)
         ringRadii.forEachIndexed { index, factor ->
             val r = radius * factor
-            rotate(degrees = ringTilts[index] + spin * (if (index % 2 == 0) 0.35f else -0.22f), pivot = Offset(cx, cy)) {
+            rotate(
+                degrees = ringTilts[index] + spin * (if (index % 2 == 0) 0.35f else -0.22f),
+                pivot = Offset(cx, cy)
+            ) {
                 drawOval(
-                    color = color.copy(alpha = 0.14f + index * 0.05f),
+                    color = color.copy(alpha = 0.20f + index * 0.06f),
                     topLeft = Offset(cx - r, cy - r * 0.42f),
                     size = Size(r * 2f, r * 0.84f),
-                    style = Stroke(width = 0.9f * unit)
+                    style = Stroke(width = 1.1f * unit)
                 )
             }
         }
@@ -196,31 +198,27 @@ fun JarvisCore(
             val depth = (rz + 1f) * 0.5f
             val px = cx + rx * radius * perspective
             val py = cy + node.y * radius * perspective * breath
-            // Audio deformation: louder speech pushes the shell outward.
-            val deform = 1f + level * 0.22f * depth
+            val deform = 1f + level * 0.20f * depth
             drawCircle(
-                color = color.copy(alpha = 0.10f + depth * 0.78f),
-                radius = (0.55f + depth * 1.55f) * unit * deform,
+                color = color.copy(alpha = 0.12f + depth * 0.80f),
+                radius = (0.7f + depth * 2.0f) * unit * deform,
                 center = Offset(px, py)
             )
         }
 
-        // ---- hot centre
+        // ---- hot centre: three flat rings read as a glow without a shader
+        drawCircle(color.copy(alpha = 0.16f), radius = radius * 0.24f, center = Offset(cx, cy))
+        drawCircle(color.copy(alpha = 0.22f), radius = radius * 0.14f, center = Offset(cx, cy))
         drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    color.copy(alpha = 0.55f + level * 0.35f),
-                    color.copy(alpha = 0.08f)
-                ),
-                center = Offset(cx, cy),
-                radius = radius * 0.30f
-            ),
-            radius = radius * 0.30f,
+            color = color.copy(alpha = 0.90f),
+            radius = 2.2f * unit + level * 3.0f * unit,
             center = Offset(cx, cy)
         )
+
+        // ---- outer vignette ring so the core does not bleed into the transcript
         drawCircle(
-            color = color.copy(alpha = 0.85f),
-            radius = 1.6f * unit + level * 2.2f * unit,
+            color = Color.Black.copy(alpha = 0.0f),
+            radius = radius * 1.6f,
             center = Offset(cx, cy)
         )
     }

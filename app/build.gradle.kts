@@ -107,6 +107,7 @@ dependencies {
 
     // Brain: Google ADK
     implementation(libs.google.adk.core)
+    implementation(libs.google.genai)
     ksp(libs.google.adk.processor)
 
     // Location reminders (geofencing)

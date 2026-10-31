@@ -540,18 +540,18 @@ class SeemaVoiceService : Service() {
         // connection dropped mid-request.
         var offline = !NetworkStatus.isOnline(this)
         var reply = if (offline) offlineBrain.handle(command) else SeemaAgent.runAgent(command)
-        var note = if (offline) " ⚠ OFFLINE" else ""
+        var note = if (offline) "⚠ OFFLINE" else ""
         when {
             // Gemini's quota for this API key is used up (free tier resets daily): basics still work.
             SeemaAgent.isQuotaError(reply) -> {
                 Log.w(TAG, "Gemini quota exhausted: $reply")
                 offline = true
-                note = " ⚠ GEMINI QUOTA USED UP — BASIC MODE"
+                note = "⚠ GEMINI QUOTA USED UP — BASIC MODE (free tier resets daily)"
                 reply = offlineBrain.handle(command)
             }
             !offline && reply.startsWith("ERROR:") && !NetworkStatus.isOnline(this) -> {
                 offline = true
-                note = " ⚠ OFFLINE"
+                note = "⚠ OFFLINE"
                 reply = offlineBrain.handle(command)
             }
         }
@@ -563,7 +563,10 @@ class SeemaVoiceService : Service() {
             holdErrorState()
             return false
         }
-        SeemaState.setResponse("YOU: $command\n\nSEEMA$note: $reply")
+        SeemaState.setResponse(
+            if (note.isBlank()) "YOU: $command\n\nSEEMA: $reply"
+            else "YOU: $command\n\n$note\n\nSEEMA: $reply"
+        )
         speak(reply)
         return true
     }

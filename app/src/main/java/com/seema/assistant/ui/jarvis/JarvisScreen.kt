@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -140,34 +141,34 @@ fun JarvisScreen(
 /** Vignette + faint engineering grid + scanlines.  Cheap to draw, and it kills the "flat app" look. */
 @Composable
 private fun Backdrop() {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val w = size.width
-        val h = size.height
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF07141C), Jarvis.Void, Color(0xFF000000)),
-                center = Offset(w / 2f, h * 0.42f),
-                radius = h * 0.72f
-            )
-        )
-        val step = 44.dp.toPx()
-        var x = 0f
-        while (x < w) {
-            drawLine(Jarvis.Hairline.copy(alpha = 0.05f), Offset(x, 0f), Offset(x, h), 1f)
-            x += step
-        }
-        var y = 0f
-        while (y < h) {
-            drawLine(Jarvis.Hairline.copy(alpha = 0.05f), Offset(0f, y), Offset(w, y), 1f)
-            y += step
-        }
-        // Scanlines: 2 px pitch, barely visible, reads as a display rather than paper.
-        var sy = 0f
-        while (sy < h) {
-            drawLine(Color.Black.copy(alpha = 0.16f), Offset(0f, sy), Offset(w, sy), 1f)
-            sy += 3.dp.toPx()
-        }
-    }
+    // drawWithCache: the gradient shader and the grid are built once per size change instead
+    // of once per frame. A per-frame Brush.radialGradient was the main source of the app's
+    // allocation churn (the GC was running twice a second while the screen was open).
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .drawWithCache {
+                val background = Brush.radialGradient(
+                    colors = listOf(Color(0xFF0B1B26), Jarvis.Void, Color(0xFF000000)),
+                    center = Offset(size.width / 2f, size.height * 0.42f),
+                    radius = size.height * 0.78f
+                )
+                val step = 64.dp.toPx()
+                onDrawBehind {
+                    drawRect(background)
+                    var x = 0f
+                    while (x < size.width) {
+                        drawLine(Jarvis.Hairline.copy(alpha = 0.05f), Offset(x, 0f), Offset(x, size.height), 1f)
+                        x += step
+                    }
+                    var y = 0f
+                    while (y < size.height) {
+                        drawLine(Jarvis.Hairline.copy(alpha = 0.05f), Offset(0f, y), Offset(size.width, y), 1f)
+                        y += step
+                    }
+                }
+            }
+    )
 }
 
 // ------------------------------------------------------------------------------------ header
@@ -276,7 +277,7 @@ private fun CoreStage(state: AgentState, level: Float, modifier: Modifier = Modi
         JarvisCore(
             state = state,
             level = level,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)
+            modifier = Modifier.fillMaxSize()
         )
         Column(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp),
@@ -490,15 +491,14 @@ private fun TalkButton(state: AgentState, micGranted: Boolean, onClick: () -> Un
         Canvas(modifier = Modifier.fillMaxSize()) {
             val c = Offset(size.width / 2f, size.height / 2f)
             val r = size.minDimension / 2f
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(color.copy(alpha = if (active) 0.30f else 0.12f), Color.Transparent),
-                    center = c,
-                    radius = r
-                ),
-                radius = r,
-                center = c
-            )
+            // Cheap layered glow: three flat circles, no per-frame shader.
+            for (i in 3 downTo 1) {
+                drawCircle(
+                    color = color.copy(alpha = if (active) 0.055f else 0.028f),
+                    radius = r * (1f - i * 0.12f),
+                    center = c
+                )
+            }
             drawCircle(color.copy(alpha = 0.7f), radius = r * 0.94f, center = c, style = Stroke(1.2.dp.toPx()))
             drawCircle(color.copy(alpha = 0.25f), radius = r * 0.80f, center = c, style = Stroke(0.8.dp.toPx()))
         }

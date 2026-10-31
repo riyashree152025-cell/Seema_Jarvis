@@ -10,6 +10,9 @@ import com.google.adk.kt.runners.InMemoryRunner
 import com.google.adk.kt.types.Content
 import com.google.adk.kt.types.Part
 import com.google.adk.kt.types.Role
+import com.google.genai.Client
+import com.google.genai.types.HttpOptions
+import com.google.genai.types.HttpRetryOptions
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -120,13 +123,35 @@ object SeemaAgent {
 
     @Volatile private var appContext: Context? = null
 
+    /**
+     * A GenAI client tuned for a voice assistant.
+     *
+     * Two settings matter:
+     * - `timeout`: a stalled call would otherwise hold the turn until our own 25 s watchdog
+     *   fires, and the user would see "did not answer" with no explanation.
+     * - `attempts = 1`: the SDK retries 429/quota errors internally with exponential backoff.
+     *   On an exhausted free-tier key that converts an instant, actionable "quota used up" into
+     *   a 25 s timeout, which then surfaces as "network error". One attempt lets the real cause
+     *   through; the retry policy that actually makes sense lives in [runAgent].
+     */
+    private fun geminiClient(apiKey: String): Client =
+        Client.builder()
+            .apiKey(apiKey)
+            .httpOptions(
+                HttpOptions.builder()
+                    .timeout(20_000)
+                    .retryOptions(HttpRetryOptions.builder().attempts(1))
+                    .build()
+            )
+            .build()
+
     private fun buildAgent(context: Context, apiKey: String, model: String): LlmAgent {
         val clockTools = SeemaClockTools(context)
         val weatherTools = SeemaWeatherTools(context)
         return LlmAgent(
             name = "Seema",
             description = "Personal JARVIS-style voice assistant.",
-            model = Gemini(name = model, apiKey = apiKey),
+            model = Gemini(client = geminiClient(apiKey), name = model),
             // Rebuilt every turn, so new memories and the current time are always included.
             instruction = Instruction { _ -> Content(parts = listOf(Part(text = buildInstruction()))) },
             tools = SeemaTools(context).generatedTools() +
@@ -237,8 +262,10 @@ object SeemaAgent {
 
     private fun isRetryable(error: String): Boolean = RETRY_MARKERS.any { error.contains(it, ignoreCase = true) }
 
+    // Quota/rate-limit errors are deliberately absent: retrying them inside the same minute
+    // cannot succeed, and it turns a one-second "quota used up" into a 60 s dead turn.
     private val RETRY_MARKERS = listOf(
-        "503", "UNAVAILABLE", "overloaded", "429", "RESOURCE_EXHAUSTED", "rate limit",
+        "503", "UNAVAILABLE", "overloaded",
         "TIMEOUT", "timed out", "500", "INTERNAL", "Unable to resolve host", "connection reset"
     )
     private const val MAX_RETRIES = 3
