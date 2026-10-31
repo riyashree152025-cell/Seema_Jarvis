@@ -23,3 +23,7 @@ captures/
 
 # OS
 .DS_Store
+
+# Built artifacts handed over
+*.apk
+

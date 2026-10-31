@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.merge
@@ -55,6 +56,11 @@ class SeemaVoiceService : Service() {
     @Volatile private var listeningSince = 0L
     /** True when no wake word model is installed; SEEMA then works through TALK, tile and widget. */
     @Volatile private var wakeWordUnavailable = false
+    /**
+     * What the resolved wake word model actually hears. Set in [resolveWakeWordModel] and used in
+     * every notification, so the phone never asks for a phrase that cannot trigger SEEMA.
+     */
+    @Volatile private var wakeWordPhrase: String = DEFAULT_WAKE_WORD_PHRASE
     private var engineInitJob: Job? = null
     private var restartJob: Job? = null
     @Volatile private var wakeWordJob: Job? = null
@@ -86,6 +92,11 @@ class SeemaVoiceService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // The user turned SEEMA on: remember it, so SeemaBootReceiver can restore it after a reboot.
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SERVICE_ENABLED, true)
+            .apply()
         SeemaAgent.init(this)
         SeemaReminders.init(this)
         SeemaPlaces.init(this)
@@ -115,7 +126,19 @@ class SeemaVoiceService : Service() {
                 when (command) {
                     SeemaCommand.START_CONVERSATION -> launchConversation()
                     SeemaCommand.DAILY_BRIEFING -> launchConversation(initialCommand = BRIEFING_QUERY)
+                    SeemaCommand.STOP -> stopConversation()
                 }
+            }
+        }
+        serviceScope.launch {
+            // Typed commands (new UI text field) run through the same pipeline as speech, so they
+            // get the same agent, tools and spoken reply.
+            SeemaState.textCommands.collect { text ->
+                val typed = text.trim()
+                if (typed.isEmpty()) return@collect
+                // Typed input is deliberate: it replaces whatever turn is in flight.
+                stopConversation()
+                launchConversation(initialCommand = typed)
             }
         }
         serviceScope.launch {
@@ -138,12 +161,27 @@ class SeemaVoiceService : Service() {
         }
         acquireWakeLock()
         if (engineInitJob == null) initEngine()
-        // Headset button / assistant gesture started us: talk right away.
-        if (intent?.action == ACTION_TALK) launchConversation()
+        when (intent?.action) {
+            // Headset button / assistant gesture started us: talk right away.
+            ACTION_TALK -> launchConversation()
+            // "Stop" in the ongoing notification: cut the reply short, end the conversation.
+            ACTION_STOP -> serviceScope.launch {
+                val busy = wakeWordJob?.isActive == true
+                stopConversation()
+                // stopConversation() re-arms listening (and its notification) only if a turn was
+                // running; otherwise replace the "Initializing..." line enterForeground() just set.
+                if (!busy) restoreWakeWordNotification()
+            }
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        // The user (or the system) stopped SEEMA: do not bring it back after the next reboot.
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SERVICE_ENABLED, false)
+            .apply()
         val current = engine
         engine = null
         current?.stop()
@@ -176,7 +214,9 @@ class SeemaVoiceService : Service() {
                 context = applicationContext,
                 models = listOf(
                     WakeWordModel(
-                        name = WAKE_WORD_NAME,
+                        // The library only uses the name for logging and cooldowns; the resolved
+                        // asset is what decides which phrase is announced to the user.
+                        name = modelPath,
                         modelPath = modelPath,
                         // The library's own detection is effectively off; SEEMA applies the
                         // threshold from Settings to the live scores below, so it can change anytime.
@@ -207,7 +247,7 @@ class SeemaVoiceService : Service() {
             // No wake word model: stay usable through TALK, the tile, the widget and the headset button.
             if (wakeWordUnavailable) {
                 SeemaState.update(if (sleeping) AgentState.SLEEPING else AgentState.LISTENING)
-                updateNotification("Wake word off · tap TALK to speak")
+                updateNotification(wakeWordStatusText())
                 if (!sleeping) resetInactivityTimer()
             }
             return
@@ -217,10 +257,10 @@ class SeemaVoiceService : Service() {
             listeningSince = SystemClock.elapsedRealtime()
             if (sleeping) {
                 SeemaState.update(AgentState.SLEEPING)
-                updateNotification("Sleeping · say \"$WAKE_WORD_NAME\" to wake me")
+                updateNotification(wakeWordStatusText())
             } else {
                 SeemaState.update(AgentState.LISTENING)
-                updateNotification("Listening for \"$WAKE_WORD_NAME\"")
+                updateNotification(wakeWordStatusText())
                 resetInactivityTimer()
             }
             Log.i(TAG, "Listening for wake word${if (sleeping) " (sleep mode)" else ""}")
@@ -228,6 +268,22 @@ class SeemaVoiceService : Service() {
             Log.e(TAG, "Could not start listening", e)
             scheduleRestart()
         }
+    }
+
+    /** The notification line for the current wake word state (no conversation running). */
+    private fun wakeWordStatusText(): String = when {
+        wakeWordUnavailable -> "Wake word off · tap TALK to speak"
+        sleeping -> "Sleeping · say \"$wakeWordPhrase\" to wake me"
+        else -> "Listening for \"$wakeWordPhrase\""
+    }
+
+    /**
+     * Rewrites that line without touching the engine, for when a control action (the notification's
+     * "Stop") arrives while nothing is speaking. Does nothing while the engine is still loading.
+     */
+    private fun restoreWakeWordNotification() {
+        if (engine == null && !wakeWordUnavailable) return
+        updateNotification(wakeWordStatusText())
     }
 
     private fun scheduleRestart() {
@@ -272,6 +328,9 @@ class SeemaVoiceService : Service() {
         if (model != WAKE_WORD_MODELS.first()) {
             Log.w(TAG, "${WAKE_WORD_MODELS.first()} not found, using fallback model '$model'")
         }
+        // Announce what this model really listens for (seema.onnx is not bundled today).
+        wakeWordPhrase = WAKE_WORD_PHRASES[model] ?: DEFAULT_WAKE_WORD_PHRASE
+        Log.i(TAG, "Wake word phrase: \"$wakeWordPhrase\" ($model)")
         return model
     }
 
@@ -297,7 +356,7 @@ class SeemaVoiceService : Service() {
 
     /**
      * No voice input for [INACTIVITY_TIMEOUT_MS]: stop any SpeechRecognizer still waiting for
-     * speech and show SLEEPING. The wake word engine keeps running, so "Hey Jarvis" wakes SEEMA.
+     * speech and show SLEEPING. The wake word engine keeps running, so the wake word still wakes SEEMA.
      */
     private fun goToSleep() {
         val conversation = wakeWordJob
@@ -319,7 +378,7 @@ class SeemaVoiceService : Service() {
             SeemaState.update(AgentState.SLEEPING)
             updateNotification(
                 if (wakeWordUnavailable) "Sleeping · tap TALK to speak"
-                else "Sleeping · say \"$WAKE_WORD_NAME\" to wake me"
+                else "Sleeping · say \"$wakeWordPhrase\" to wake me"
             )
         }
     }
@@ -367,6 +426,19 @@ class SeemaVoiceService : Service() {
                 audioManager.abandonAudioFocusRequest(conversationFocus)
             }
         }
+    }
+
+    /**
+     * Fake barge-in: ends the current turn right away, even in the middle of a spoken reply.
+     *
+     * [SeemaTextToSpeech] has no public stop, but cancelling the conversation job resumes its
+     * `speak()` suspension with a [CancellationException], and the `finally` block there flushes
+     * TextToSpeech. The conversation's own `finally` then re-arms the wake word, so the next wake
+     * word works as usual. Never call this from inside [wakeWordJob] (it joins that job).
+     */
+    private suspend fun stopConversation() {
+        SeemaState.requestConversationEnd()
+        wakeWordJob?.cancelAndJoin()
     }
 
     /**
@@ -616,6 +688,19 @@ class SeemaVoiceService : Service() {
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 )
             )
+            // Fake barge-in: stops the reply that is playing, without opening the app.
+            .addAction(
+                NotificationCompat.Action(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Stop",
+                    PendingIntent.getService(
+                        this,
+                        STOP_INTENT_REQUEST_CODE,
+                        Intent(this, SeemaVoiceService::class.java).setAction(ACTION_STOP),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                )
+            )
             .build()
 
     companion object {
@@ -624,9 +709,15 @@ class SeemaVoiceService : Service() {
         const val CHANNEL_ID = "seema_voice"
         /** Start intent action: begin a conversation immediately (headset button, assistant gesture). */
         const val ACTION_TALK = "com.seema.assistant.action.TALK"
+        /** Stop intent action: end the current turn and silence the reply (notification "Stop"). */
+        const val ACTION_STOP = "com.seema.assistant.action.STOP"
         const val NOTIFICATION_ID = 1001
+        private const val STOP_INTENT_REQUEST_CODE = 1
 
-        private const val WAKE_WORD_NAME = "Seema"
+        /** SharedPreferences file and flag telling [SeemaBootReceiver] whether SEEMA was running. */
+        const val PREFS_NAME = "seema_voice"
+        const val KEY_SERVICE_ENABLED = "service_enabled"
+
         /** Above any real score: the library's own detections never fire. */
         private const val LIBRARY_THRESHOLD_OFF = 2f
         private const val DETECTION_COOLDOWN_MS = 2000L
@@ -673,7 +764,20 @@ class SeemaVoiceService : Service() {
         /** Loaded internally by the library under these exact names. */
         private val FEATURE_MODELS = listOf("melspectrogram.onnx", "embedding_model.onnx")
 
+        /**
+         * The phrase each bundled model actually detects. The notifications show the phrase of the
+         * model that resolved, so SEEMA never tells the user to say something that cannot work
+         * (`seema.onnx` is not shipped today; `hey_jarvis_v0.1.onnx` is).
+         */
+        private val WAKE_WORD_PHRASES = mapOf(
+            "seema.onnx" to "Seema",
+            "hey_jarvis_v0.1.onnx" to "Hey Jarvis"
+        )
+
         /** First match wins. */
         private val WAKE_WORD_MODELS = listOf("seema.onnx", "hey_jarvis_v0.1.onnx")
+
+        /** Used until [resolveWakeWordModel] picks a model, and for a model without a phrase above. */
+        private const val DEFAULT_WAKE_WORD_PHRASE = "Hey Jarvis"
     }
 }

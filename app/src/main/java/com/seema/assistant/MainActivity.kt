@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.app.StatusBarManager
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
@@ -21,79 +20,41 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.seema.assistant.ui.components.ReactorHud
-import com.seema.assistant.ui.components.TacticalHud
-import com.seema.assistant.ui.components.VoiceSettingsDialog
-import com.seema.assistant.ui.components.reactorColor
-import com.seema.assistant.ui.theme.AlertRed
-import com.seema.assistant.ui.theme.DeepSpace
-import com.seema.assistant.ui.theme.GridLine
-import com.seema.assistant.ui.theme.JarvisCyan
-import com.seema.assistant.ui.theme.PanelSurface
+import com.seema.assistant.ui.jarvis.JarvisScreen
 import com.seema.assistant.ui.theme.SeemaTheme
-import com.seema.assistant.ui.theme.TextSecondary
 
+/**
+ * The only activity: shows the JARVIS interface and makes sure the always-on voice service
+ * can actually run.
+ *
+ * Permissions are requested in waves instead of one giant dialog, because a ten-permission
+ * prompt on first launch is the fastest way to get a personal assistant uninstalled. The
+ * voice service only needs the microphone; everything else has a degraded but working path,
+ * except the two silent killers handled below — the overlay grant (needed by openApp,
+ * playMusic and setAlarm on Android 10+) and the notification listener (needed by
+ * readNotifications and replyToMessage).
+ */
 class MainActivity : ComponentActivity() {
 
     private var micGranted by mutableStateOf(false)
     private var askedOnce = false
     private var batteryPromptShown = false
+    private var overlayPromptShown = false
+    private var listenerPromptShown = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         micGranted = hasMicPermission()
-        if (micGranted) startVoiceService()
+        if (micGranted) {
+            startVoiceService()
+            requestBackgroundLocation()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,39 +72,56 @@ class MainActivity : ComponentActivity() {
                 val state by SeemaState.state.collectAsStateWithLifecycle()
                 val lastResponse by SeemaState.lastResponse.collectAsStateWithLifecycle()
                 val audioLevel by SeemaState.audioLevel.collectAsStateWithLifecycle()
+                val serviceRunning by SeemaState.serviceRunning.collectAsStateWithLifecycle()
                 val routines by SeemaRoutines.routinesFlow.collectAsStateWithLifecycle()
-                SeemaScreen(
+
+                JarvisScreen(
                     state = state,
                     lastResponse = lastResponse,
                     audioLevel = audioLevel,
                     micGranted = micGranted,
+                    serviceRunning = serviceRunning,
+                    routineNames = routines.map { it.name },
                     onGrantClick = ::onGrantClick,
                     onTalk = { SeemaState.send(SeemaCommand.START_CONVERSATION) },
                     onBriefing = { SeemaState.send(SeemaCommand.DAILY_BRIEFING) },
-                    routines = routines,
                     onRunRoutine = { name -> SeemaState.requestRoutine(name) },
-                    onAddTile = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) ::requestAddTile else null,
-                    onAddWidget = if (AppWidgetManager.getInstance(this).isRequestPinAppWidgetSupported) ::requestAddWidget else null
+                    onAddTile = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        ::requestAddTile
+                    } else null,
+                    onAddWidget = if (AppWidgetManager.getInstance(this).isRequestPinAppWidgetSupported) {
+                        ::requestAddWidget
+                    } else null,
+                    onSendText = { text -> SeemaState.sendText(text) }
                 )
             }
         }
 
-        if (micGranted) startVoiceService() else requestPermissions()
+        if (micGranted) {
+            startVoiceService()
+            requestBackgroundLocation()
+        } else {
+            requestPermissions()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        // Covers the case where the user granted the mic from system Settings.
+        // Covers grants made from system Settings while the app was in the background.
         if (!micGranted && hasMicPermission()) {
             micGranted = true
             startVoiceService()
         }
+        requestMissingCapabilities()
     }
 
     private fun hasMicPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
+    // ------------------------------------------------------------------ permission flow
+
+    /** Wave one: the microphone, plus the everyday tools. Optional ones are skipped, not fatal. */
     private fun requestPermissions() {
         askedOnce = true
         val permissions = buildList {
@@ -166,6 +144,56 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(permissions.toTypedArray())
     }
 
+    /**
+     * Wave two: "allow all the time" location, requested only after fine location is granted —
+     * Android refuses to show the background dialog otherwise, and geofence reminders stay dead
+     * without it. The system page is the only reliable route on Android 11+.
+     */
+    private fun requestBackgroundLocation() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        ) return
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.fromParts("package", packageName, null))
+            )
+        }
+    }
+
+    /**
+     * The two silent killers. Both are special accesses with no runtime dialog, both are
+     * checked by tools at call time, and without them "open YouTube", "play music", "set an
+     * alarm" and "read my notifications" all fail.
+     */
+    private fun requestMissingCapabilities() {
+        if (!overlayPromptShown && !canDrawOverlays()) {
+            overlayPromptShown = true
+            runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                        .setData(Uri.fromParts("package", packageName, null))
+                )
+            }
+        }
+        if (!listenerPromptShown && !hasNotificationAccess()) {
+            listenerPromptShown = true
+            runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        }
+    }
+
+    private fun canDrawOverlays(): Boolean = Settings.canDrawOverlays(this)
+
+    private fun hasNotificationAccess(): Boolean {
+        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            ?: return false
+        return flat.contains(packageName)
+    }
+
     private fun onGrantClick() {
         val permanentlyDenied = askedOnce &&
             !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
@@ -178,6 +206,8 @@ class MainActivity : ComponentActivity() {
             requestPermissions()
         }
     }
+
+    // ------------------------------------------------------------------ quick settings / widget
 
     /** Android 13+: system dialog that adds the SEEMA tile to Quick Settings in one tap. */
     private fun requestAddTile() {
@@ -195,6 +225,8 @@ class MainActivity : ComponentActivity() {
         AppWidgetManager.getInstance(this)
             .requestPinAppWidget(ComponentName(this, SeemaWidgetProvider::class.java), null, null)
     }
+
+    // ------------------------------------------------------------------ service lifecycle
 
     private fun startVoiceService() {
         ContextCompat.startForegroundService(this, Intent(this, SeemaVoiceService::class.java))
@@ -214,290 +246,3 @@ class MainActivity : ComponentActivity() {
         )
     }
 }
-
-@Composable
-fun SeemaScreen(
-    state: AgentState,
-    lastResponse: String,
-    audioLevel: Float,
-    micGranted: Boolean,
-    onGrantClick: () -> Unit,
-    onTalk: () -> Unit,
-    onBriefing: () -> Unit,
-    routines: List<Routine>,
-    onRunRoutine: (String) -> Unit,
-    onAddTile: (() -> Unit)?,
-    onAddWidget: (() -> Unit)?
-) {
-    val displayState = if (micGranted) state else AgentState.IDLE
-    var showSettings by rememberSaveable { mutableStateOf(false) }
-    val context = LocalContext.current
-    // Tactical (radar + globe) is the default view; the last choice is remembered.
-    val uiPrefs = remember { context.getSharedPreferences("seema_ui", Context.MODE_PRIVATE) }
-    var tactical by remember { mutableStateOf(uiPrefs.getBoolean(KEY_TACTICAL, true)) }
-    // The wake word that actually works: "Seema" once seema.onnx is added, else "Hey Jarvis".
-    val wakeWord = remember {
-        if (context.assets.list("")?.contains("seema.onnx") == true) "SEEMA" else "HEY JARVIS"
-    }
-    if (showSettings) VoiceSettingsDialog(onDismiss = { showSettings = false })
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DeepSpace)
-            .drawBehind { drawHud() }
-            .systemBarsPadding()
-            .padding(24.dp)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "SEEMA",
-                        style = MaterialTheme.typography.displayLarge,
-                        color = JarvisCyan
-                    )
-                    Text(
-                        text = "PERSONAL AI SYSTEM // v1.0",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
-                    )
-                }
-                // HUD mode: arc reactor or tactical (radar + globe)
-                Text(
-                    text = if (tactical) "◉ REACTOR" else "◎ TACTICAL",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = JarvisCyan,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .clickable {
-                            tactical = !tactical
-                            uiPrefs.edit().putBoolean(KEY_TACTICAL, tactical).apply()
-                        }
-                        .padding(8.dp)
-                )
-                // Voice settings
-                Text(
-                    text = "⚙",
-                    fontSize = 22.sp,
-                    color = JarvisCyan,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .clickable { showSettings = true }
-                        .padding(8.dp)
-                )
-            }
-
-            // Takes all the height the other elements leave, so it fits small screens too.
-            Crossfade(
-                targetState = tactical,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                label = "hudMode"
-            ) { showTactical ->
-                if (showTactical) {
-                    TacticalHud(state = displayState, modifier = Modifier.fillMaxSize())
-                } else {
-                    ReactorHud(
-                        state = displayState,
-                        audioLevel = if (displayState == AgentState.HEARING) audioLevel else 0f,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-
-            StatusIndicator(
-                state = displayState,
-                micGranted = micGranted,
-                onGrantClick = onGrantClick
-            )
-
-            if (micGranted) {
-                ControlRow(
-                    busy = displayState == AgentState.HEARING || displayState == AgentState.THINKING ||
-                        displayState == AgentState.SPEAKING,
-                    onTalk = onTalk,
-                    onBriefing = onBriefing,
-                    routines = routines,
-                    onRunRoutine = onRunRoutine,
-                    onAddTile = onAddTile,
-                    onAddWidget = onAddWidget
-                )
-            }
-
-            ResponsePanel(lastResponse = lastResponse, wakeWord = wakeWord)
-        }
-    }
-}
-
-@Composable
-private fun StatusIndicator(
-    state: AgentState,
-    micGranted: Boolean,
-    onGrantClick: () -> Unit
-) {
-    val blink by rememberInfiniteTransition(label = "blink").animateFloat(
-        initialValue = 1f,
-        targetValue = 0.2f,
-        animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
-        label = "blinkAlpha"
-    )
-
-    if (!micGranted) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "MICROPHONE ACCESS REQUIRED",
-                style = MaterialTheme.typography.labelLarge,
-                color = AlertRed,
-                modifier = Modifier.alpha(blink)
-            )
-            Spacer(Modifier.size(12.dp))
-            OutlinedButton(
-                onClick = onGrantClick,
-                shape = RoundedCornerShape(4.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisCyan)
-            ) {
-                Text("GRANT ACCESS", style = MaterialTheme.typography.labelLarge)
-            }
-        }
-        return
-    }
-
-    val color = state.reactorColor()
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .alpha(blink)
-                .background(color, CircleShape)
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = state.label,
-            style = MaterialTheme.typography.titleMedium,
-            color = color
-        )
-    }
-}
-
-/** TALK and BRIEFING work like the wake word; they are disabled while SEEMA is busy. */
-@Composable
-private fun ControlRow(
-    busy: Boolean,
-    onTalk: () -> Unit,
-    onBriefing: () -> Unit,
-    routines: List<Routine>,
-    onRunRoutine: (String) -> Unit,
-    onAddTile: (() -> Unit)?,
-    onAddWidget: (() -> Unit)?
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            HudButton("TALK", enabled = !busy, onClick = onTalk)
-            HudButton("BRIEFING", enabled = !busy, onClick = onBriefing)
-        }
-        if (routines.isNotEmpty()) {
-            // One chip per routine; scrolls sideways when there are many.
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                routines.forEach { routine ->
-                    HudButton(
-                        label = "▸ ${routine.name.uppercase()}",
-                        enabled = !busy,
-                        onClick = { onRunRoutine(routine.name) }
-                    )
-                }
-            }
-        }
-        if (onAddTile != null || onAddWidget != null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (onAddTile != null) HudButton("+ TILE", enabled = true, onClick = onAddTile)
-                if (onAddWidget != null) HudButton("+ WIDGET", enabled = true, onClick = onAddWidget)
-            }
-        }
-    }
-}
-
-@Composable
-private fun HudButton(label: String, enabled: Boolean, onClick: () -> Unit) {
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        shape = RoundedCornerShape(4.dp),
-        border = BorderStroke(1.dp, JarvisCyan.copy(alpha = if (enabled) 0.7f else 0.2f)),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = JarvisCyan,
-            disabledContentColor = TextSecondary.copy(alpha = 0.4f)
-        )
-    ) {
-        Text(label, style = MaterialTheme.typography.labelLarge)
-    }
-}
-
-@Composable
-private fun ResponsePanel(lastResponse: String, wakeWord: String) {
-    val shape = RoundedCornerShape(4.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 72.dp, max = 160.dp)
-            .background(PanelSurface.copy(alpha = 0.7f), shape)
-            .border(1.dp, JarvisCyan.copy(alpha = 0.4f), shape)
-            .padding(16.dp)
-    ) {
-        Text(
-            text = if (lastResponse.isBlank()) "> AWAITING WAKE WORD \"$wakeWord\"_" else "> $lastResponse",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary,
-            textAlign = TextAlign.Start,
-            modifier = Modifier.verticalScroll(rememberScrollState())
-        )
-    }
-}
-
-/** Background HUD: faint grid plus corner brackets. */
-private fun DrawScope.drawHud() {
-    val step = 32.dp.toPx()
-    val stroke = 1.dp.toPx()
-
-    var x = 0f
-    while (x < size.width) {
-        drawLine(GridLine, Offset(x, 0f), Offset(x, size.height), stroke)
-        x += step
-    }
-    var y = 0f
-    while (y < size.height) {
-        drawLine(GridLine, Offset(0f, y), Offset(size.width, y), stroke)
-        y += step
-    }
-
-    val inset = 16.dp.toPx()
-    val len = 28.dp.toPx()
-    val bracket = JarvisCyan.copy(alpha = 0.6f)
-    val w = 2.dp.toPx()
-    val corners = listOf(
-        Offset(inset, inset) to Offset(1f, 1f),
-        Offset(size.width - inset, inset) to Offset(-1f, 1f),
-        Offset(inset, size.height - inset) to Offset(1f, -1f),
-        Offset(size.width - inset, size.height - inset) to Offset(-1f, -1f)
-    )
-    corners.forEach { (p, dir) ->
-        drawLine(bracket, p, Offset(p.x + len * dir.x, p.y), w)
-        drawLine(bracket, p, Offset(p.x, p.y + len * dir.y), w)
-    }
-}
-
-private const val KEY_TACTICAL = "tactical"

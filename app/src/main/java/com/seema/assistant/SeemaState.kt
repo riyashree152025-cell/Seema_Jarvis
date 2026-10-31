@@ -28,7 +28,10 @@ enum class SeemaCommand {
     START_CONVERSATION,
 
     /** Speak the daily briefing, then stay in follow-up mode. */
-    DAILY_BRIEFING
+    DAILY_BRIEFING,
+
+    /** Fake barge-in: stop speaking now and end the turn (notification "Stop", in-app button). */
+    STOP
 }
 
 /** Shared state between SeemaVoiceService and the UI. */
@@ -86,6 +89,16 @@ object SeemaState {
     /** Delivers [command] to the voice service; dropped if the service is not running. */
     fun send(command: SeemaCommand) {
         _commands.tryEmit(command)
+    }
+
+    private val _textCommands = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /** Typed commands, handled exactly like a spoken one (same agent, same speech). */
+    val textCommands: SharedFlow<String> = _textCommands.asSharedFlow()
+
+    /** Delivers typed [text] to the voice service; dropped if the service is not running. */
+    fun sendText(text: String) {
+        _textCommands.tryEmit(text)
     }
 
     fun update(newState: AgentState) {

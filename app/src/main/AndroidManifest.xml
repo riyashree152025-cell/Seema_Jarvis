@@ -167,6 +167,28 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Restarts the always-on listener after a reboot or an app update.
+            exported="false": the system itself sends these broadcasts (BOOT_COMPLETED and
+            MY_PACKAGE_REPLACED are protected, and Android still delivers them to a
+            non-exported receiver, exactly like androidx.work's own boot receiver), while any
+            other app is kept out. The receiver only starts SeemaVoiceService when the user had
+            left it running (SharedPreferences flag "seema_voice/service_enabled").
+            The QUICKBOOT actions are the OEM quick-boot variants; they are not protected, which
+            is the second reason to keep this receiver non-exported.
+        -->
+        <receiver
+            android:name=".SeemaBootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".GeofenceReceiver"
             android:exported="false" />
